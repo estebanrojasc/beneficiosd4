@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // Permite probar en celulares con Cloudflare Quick Tunnel.
+  // Sin esto, Next dev bloquea el WebSocket de HMR desde *.trycloudflare.com.
+  allowedDevOrigins: ["*.trycloudflare.com"],
 };
 
 export default nextConfig;
