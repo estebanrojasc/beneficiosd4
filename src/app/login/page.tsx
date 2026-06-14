@@ -3,9 +3,11 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useBranding, BrandLogo } from "@/components/Brand";
 
 export default function LoginPage() {
   const router = useRouter();
+  const { name, hasLogo } = useBranding();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -41,7 +43,12 @@ export default function LoginPage() {
         className="card p-8 w-full max-w-md animate-pop"
       >
         <div className="text-center mb-6">
-          <div className="text-6xl mb-2">🔑</div>
+          <div className="mb-2 flex justify-center">
+            <BrandLogo hasLogo={hasLogo} fallback="🔑" size={hasLogo ? 80 : 64} />
+          </div>
+          {name && (
+            <div className="font-black text-[#27407a] text-lg">{name}</div>
+          )}
           <h1 className="text-2xl font-black text-[#27407a]">
             Ingreso del docente
           </h1>

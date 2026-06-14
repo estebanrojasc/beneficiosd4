@@ -10,11 +10,14 @@ interface StudentRow extends StudentLite {
   enrolled: boolean;
 }
 
+const PAGE_SIZE = 60;
+
 export default function StudentsTab() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [q, setQ] = useState("");
   const [cursoFilter, setCursoFilter] = useState("");
   const [loading, setLoading] = useState(false);
+  const [visible, setVisible] = useState(PAGE_SIZE);
   const [modal, setModal] = useState<{
     open: boolean;
     initial?: Partial<StudentLite>;
@@ -39,6 +42,9 @@ export default function StudentsTab() {
     ? students.filter((s) => s.curso === cursoFilter)
     : students;
 
+  const shown = filtered.slice(0, visible);
+  const hasMore = filtered.length > visible;
+
   async function remove(id: string, nombre: string) {
     if (!confirm(`¿Eliminar a ${nombre}?`)) return;
     await fetch(`/api/students/${id}`, { method: "DELETE" });
@@ -52,12 +58,18 @@ export default function StudentsTab() {
           className="input-game flex-1"
           placeholder="🔍 Buscar por nombre, apellido, RUT o curso..."
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setVisible(PAGE_SIZE);
+          }}
         />
         <div className="w-full sm:w-56">
           <CursoSelect
             value={cursoFilter}
-            onChange={setCursoFilter}
+            onChange={(v) => {
+              setCursoFilter(v);
+              setVisible(PAGE_SIZE);
+            }}
             className="input-game"
             emptyLabel="Todos los cursos"
           />
@@ -82,8 +94,14 @@ export default function StudentsTab() {
         </div>
       )}
 
+      {!loading && filtered.length > 0 && (
+        <div className="text-sm font-bold text-[#6b7aa0] mb-3">
+          Mostrando {shown.length} de {filtered.length}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {filtered.map((s) => (
+        {shown.map((s) => (
           <div
             key={s._id}
             className="card p-4 flex items-center justify-between gap-3"
@@ -125,6 +143,17 @@ export default function StudentsTab() {
           </div>
         ))}
       </div>
+
+      {hasMore && (
+        <div className="flex justify-center mt-5">
+          <button
+            onClick={() => setVisible((v) => v + PAGE_SIZE)}
+            className="btn-game btn-gray !px-6"
+          >
+            Ver más ({filtered.length - visible} restantes)
+          </button>
+        </div>
+      )}
 
       {modal.open && (
         <StudentModal

@@ -10,7 +10,7 @@ import { fullName } from "./curso";
 // colecciones genéricas (program_members + program_records).
 export const ALMUERZO_SLUG = "almuerzo";
 
-interface ProgramDoc {
+export interface ProgramDoc {
   _id: ObjectId;
   nombre: string;
   descripcion?: string;

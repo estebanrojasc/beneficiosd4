@@ -9,6 +9,7 @@ import AjustesTab from "@/components/mantenedor/AjustesTab";
 import ProgramasTab from "@/components/mantenedor/ProgramasTab";
 import UsuariosTab from "@/components/mantenedor/UsuariosTab";
 import RolesTab from "@/components/mantenedor/RolesTab";
+import { useBranding, BrandLogo } from "@/components/Brand";
 import type { CapKey, RoleCaps } from "@/lib/types";
 
 type Section = "operacion" | "gestion";
@@ -86,6 +87,7 @@ function getInitialNav(): { section: Section; tab: Tab } {
 
 export default function MantenedorPage() {
   const router = useRouter();
+  const { name, hasLogo } = useBranding();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [caps, setCaps] = useState<RoleCaps | null>(null);
   const [section, setSection] = useState<Section>(() => getInitialNav().section);
@@ -177,10 +179,17 @@ export default function MantenedorPage() {
     <main className="min-h-screen">
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b-2 border-[#eef2ff] px-4 py-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-2xl">🍽️</span>
-          <h1 className="text-xl font-black text-[#27407a] truncate">
-            Mantenedor
-          </h1>
+          <BrandLogo hasLogo={hasLogo} fallback="🍽️" size={32} />
+          <div className="min-w-0">
+            <h1 className="text-xl font-black text-[#27407a] truncate leading-tight">
+              {name || "Mantenedor"}
+            </h1>
+            {name && (
+              <div className="text-[11px] font-bold text-[#9aa6bf] leading-tight">
+                Mantenedor
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Selector de sección compacto, dentro de la barra superior. */}

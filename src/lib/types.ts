@@ -95,6 +95,44 @@ export interface Role {
   builtin: boolean;
 }
 
+// --- Carga masiva con IA -----------------------------------------------------
+
+export type ImportStatus =
+  | "processing"
+  | "review"
+  | "committing"
+  | "done"
+  | "error"
+  | "cancelled";
+
+// Un estudiante extraído por la IA, con sus validaciones para revisión.
+export interface ImportStudent {
+  nombre: string;
+  apellidos: string;
+  rut: string;
+  curso: string;
+  rutValido: boolean;
+  yaExiste: boolean; // ya está en la base de datos
+  enrolado: boolean; // ya tiene cara registrada
+  dupEnArchivo: boolean; // RUT repetido dentro del mismo archivo
+  incluir: boolean; // seleccionado para cargar
+}
+
+export interface ImportJob {
+  _id: string;
+  status: ImportStatus;
+  programId: string;
+  fileName: string;
+  comentario: string;
+  pageCount: number;
+  students: ImportStudent[];
+  summary?: { created: number; skipped: number; errors: number };
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+  createdBy?: string;
+}
+
 export interface AppUser {
   _id?: string;
   username: string; // normalizado a minúsculas

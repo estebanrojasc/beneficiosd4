@@ -10,10 +10,16 @@ export interface AppSettings {
   // Similitud coseno (0–1) sobre la cual se considera que dos caras son la
   // MISMA persona. Más alto = más estricto (deja pasar gemelos/hermanos).
   umbralCaraDuplicada: number;
+  // Identidad institucional para reportes y branding.
+  establecimientoNombre: string;
+  // Logo como data URL (base64) o vacío.
+  logo: string;
 }
 
 const DEFAULT_UMBRAL = 70;
 const DEFAULT_UMBRAL_CARA = 0.75;
+// Límite del logo para no inflar la base ni los reportes (~250 KB en base64).
+const MAX_LOGO_LEN = 350_000;
 
 export async function getSettings(db: Db): Promise<AppSettings> {
   const doc = await db.collection("settings").findOne({ key: SETTINGS_KEY });
@@ -29,6 +35,11 @@ export async function getSettings(db: Db): Promise<AppSettings> {
       Number.isFinite(umbralCara) && umbralCara > 0 && umbralCara <= 1
         ? umbralCara
         : DEFAULT_UMBRAL_CARA,
+    establecimientoNombre:
+      typeof doc?.establecimientoNombre === "string"
+        ? doc.establecimientoNombre
+        : "",
+    logo: typeof doc?.logo === "string" ? doc.logo : "",
   };
 }
 
@@ -46,6 +57,16 @@ export async function saveSettings(
   if (patch.umbralCaraDuplicada !== undefined) {
     const u = Number(patch.umbralCaraDuplicada);
     if (Number.isFinite(u) && u > 0 && u <= 1) set.umbralCaraDuplicada = u;
+  }
+  if (patch.establecimientoNombre !== undefined) {
+    set.establecimientoNombre = String(patch.establecimientoNombre).slice(0, 120);
+  }
+  if (patch.logo !== undefined) {
+    const logo = String(patch.logo);
+    // Solo aceptamos data URLs de imagen dentro del límite, o vacío para quitarlo.
+    if (logo === "") set.logo = "";
+    else if (/^data:image\//.test(logo) && logo.length <= MAX_LOGO_LEN)
+      set.logo = logo;
   }
 
   await db.collection("settings").updateOne(

@@ -12,6 +12,11 @@ export const metadata: Metadata = {
   title: "Registro Escolar",
   description: "Listas y validación con reconocimiento facial",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/api/branding/logo",
+    shortcut: "/api/branding/logo",
+    apple: "/api/branding/logo",
+  },
 };
 
 export const viewport: Viewport = {

@@ -8,6 +8,7 @@ import { isValidRut, formatRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
 import CursoSelect from "@/components/CursoSelect";
 import FaceCapture from "@/components/FaceCapture";
+import BulkAIImport from "@/components/mantenedor/BulkAIImport";
 
 const ICON_CHOICES = ["🍽️", "📦", "🪪", "🎒", "📚", "🎫", "💊", "🧥", "🗂️"];
 
@@ -20,6 +21,20 @@ function claveSugerida(nombre: string): string {
     .replace(/[^a-z0-9]+/g, "")
     .slice(0, 18);
   return `${base || "programa"}${new Date().getFullYear()}`;
+}
+
+interface Branding {
+  nombre: string;
+  logo: string;
+}
+
+// Encabezado institucional (logo + nombre) para los reportes impresos.
+function brandingHeaderHtml(b: Branding): string {
+  if (!b.nombre && !b.logo) return "";
+  return `<div style="display:flex;align-items:center;gap:12px;border-bottom:2px solid #eef2ff;padding-bottom:8px;margin-bottom:12px">
+    ${b.logo ? `<img src="${b.logo}" style="height:48px;width:auto" alt="logo" />` : ""}
+    ${b.nombre ? `<div style="font-size:18px;font-weight:bold;color:#27407a">${escapeHtml(b.nombre)}</div>` : ""}
+  </div>`;
 }
 
 type Mode = "operacion" | "gestion";
@@ -543,6 +558,7 @@ function MembersSection({
   const [addOpen, setAddOpen] = useState(false);
   const [bulk, setBulk] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [msg, setMsg] = useState("");
   const [enrollRow, setEnrollRow] = useState<MemberView | null>(null);
 
@@ -703,24 +719,45 @@ function MembersSection({
             onClick={() => setBulkOpen((b) => !b)}
             className="font-bold text-[#4f7cff]"
           >
-            {bulkOpen ? "▲ Ocultar carga masiva" : "▼ Carga masiva (pegar lista)"}
+            {bulkOpen ? "▲ Ocultar carga masiva" : "▼ Carga masiva"}
           </button>
           {bulkOpen && (
-            <div>
-              <p className="text-sm text-[#6b7aa0] font-semibold mb-2">
-                Una línea por estudiante:{" "}
-                <code>RUT;Nombre;Apellidos;Nivel;Ciclo;Letra</code> (también vale
-                solo el RUT).
-              </p>
-              <textarea
-                className="input-game min-h-[120px] font-mono text-sm"
-                value={bulk}
-                onChange={(e) => setBulk(e.target.value)}
-                placeholder={"12.345.678-9;Juan;Pérez;3;Básico;A\n11.222.333-4"}
-              />
-              <button onClick={importBulk} className="btn-game btn-purple mt-2">
-                📥 Importar
-              </button>
+            <div className="space-y-4">
+              <div>
+                <div className="font-bold text-[#41507a] text-sm mb-1">
+                  Pegar lista (texto)
+                </div>
+                <p className="text-sm text-[#6b7aa0] font-semibold mb-2">
+                  Una línea por estudiante:{" "}
+                  <code>RUT;Nombre;Apellidos;Nivel;Ciclo;Letra</code> (también
+                  vale solo el RUT).
+                </p>
+                <textarea
+                  className="input-game min-h-[120px] font-mono text-sm"
+                  value={bulk}
+                  onChange={(e) => setBulk(e.target.value)}
+                  placeholder={"12.345.678-9;Juan;Pérez;3;Básico;A\n11.222.333-4"}
+                />
+                <button onClick={importBulk} className="btn-game btn-purple mt-2">
+                  📥 Importar lista pegada
+                </button>
+              </div>
+
+              <div className="border-t-2 border-[#eef2ff] pt-3">
+                <div className="font-bold text-[#41507a] text-sm mb-1">
+                  Desde un archivo (IA)
+                </div>
+                <p className="text-sm text-[#6b7aa0] font-semibold mb-2">
+                  Sube un PDF, imagen, Excel o Word y la IA extrae los
+                  estudiantes para revisarlos y agregarlos a esta lista.
+                </p>
+                <button
+                  onClick={() => setAiOpen(true)}
+                  className="btn-game btn-green"
+                >
+                  🤖 Carga masiva con IA
+                </button>
+              </div>
             </div>
           )}
 
@@ -823,6 +860,18 @@ function MembersSection({
           onClose={() => setEnrollRow(null)}
           onDone={() => {
             setEnrollRow(null);
+            load();
+            onChanged();
+          }}
+        />
+      )}
+
+      {aiOpen && (
+        <BulkAIImport
+          programId={program._id ?? ""}
+          onClose={() => setAiOpen(false)}
+          onDone={() => {
+            setAiOpen(false);
             load();
             onChanged();
           }}
@@ -987,6 +1036,7 @@ function QRSection({
   const [dataUrl, setDataUrl] = useState("");
   const [url, setUrl] = useState("");
   const [nowTs, setNowTs] = useState(0);
+  const [branding, setBranding] = useState<Branding>({ nombre: "", logo: "" });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -996,6 +1046,22 @@ function QRSection({
     }, 0);
     return () => window.clearTimeout(t);
   }, [program.qrToken, program.qrOpenAt]);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      fetch("/api/settings")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d)
+            setBranding({
+              nombre: d.establecimientoNombre || "",
+              logo: d.logo || "",
+            });
+        })
+        .catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (!url) return;
@@ -1031,6 +1097,7 @@ function QRSection({
     w.document.write(`
       <html><head><title>QR ${program.nombre}</title></head>
       <body style="text-align:center;font-family:sans-serif;padding:40px">
+        ${brandingHeaderHtml(branding)}
         <h1 style="color:#27407a">${program.icono} ${program.nombre}</h1>
         <p style="font-size:18px;color:#444">Escanea para registrarte</p>
         <img src="${dataUrl}" style="width:420px;height:420px" />
@@ -1171,6 +1238,23 @@ function ReportSection({ program }: { program: Program }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null);
   const [soloBajos, setSoloBajos] = useState(false);
+  const [branding, setBranding] = useState<Branding>({ nombre: "", logo: "" });
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      fetch("/api/settings")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (d)
+            setBranding({
+              nombre: d.establecimientoNombre || "",
+              logo: d.logo || "",
+            });
+        })
+        .catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1195,7 +1279,7 @@ function ReportSection({ program }: { program: Program }) {
 
   if (program.modalidad === "puntual") {
     return (
-      <PuntualReport program={program} data={data} />
+      <PuntualReport program={program} data={data} branding={branding} />
     );
   }
 
@@ -1222,7 +1306,7 @@ function ReportSection({ program }: { program: Program }) {
       <style>@page{size:A4 landscape;margin:12mm}body{font-family:sans-serif;color:#222}
       h1{color:#27407a}table{border-collapse:collapse;width:100%;font-size:11px}
       th,td{border:1px solid #ccc;padding:3px 5px}th{background:#eef2ff}</style></head>
-      <body><h1>${program.icono} ${escapeHtml(program.nombre)} — ${month}</h1>
+      <body>${brandingHeaderHtml(branding)}<h1>${program.icono} ${escapeHtml(program.nombre)} — ${month}</h1>
       <p>Días con servicio: ${days.length} · Umbral baja asistencia: ${umbral}%</p>
       <table><thead><tr><th>Curso</th><th>Nombre</th>
       ${days.map((d) => `<th>${d.slice(8)}</th>`).join("")}
@@ -1303,10 +1387,12 @@ function ReportSection({ program }: { program: Program }) {
 function PuntualReport({
   program,
   data,
+  branding,
 }: {
   program: Program;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any;
+  branding: Branding;
 }) {
   const [soloPendientes, setSoloPendientes] = useState(false);
   let students: PuntualStudent[] = data.students || [];
@@ -1330,7 +1416,7 @@ function PuntualReport({
       <style>@page{size:A4;margin:14mm}body{font-family:sans-serif;color:#222}
       h1{color:#27407a}table{border-collapse:collapse;width:100%;font-size:12px}
       th,td{border:1px solid #ccc;padding:4px 6px}th{background:#eef2ff}</style></head>
-      <body><h1>${program.icono} ${escapeHtml(program.nombre)}</h1>
+      <body>${brandingHeaderHtml(branding)}<h1>${program.icono} ${escapeHtml(program.nombre)}</h1>
       <p>Entregados: ${data.deliveredCount} de ${data.total}</p>
       <table><thead><tr><th>Curso</th><th>Nombre</th><th>Estado</th><th>Fecha</th></tr></thead>
       <tbody>${rows}</tbody></table></body></html>`);
@@ -1424,19 +1510,6 @@ function SettingsSection({
   const [clave, setClave] = useState(program.validadorClave);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [validadorUrl, setValidadorUrl] = useState("");
-  const [copied, setCopied] = useState(false);
-  const linkId = program.slug || program._id;
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const t = window.setTimeout(
-      () =>
-        setValidadorUrl(`${window.location.origin}/validar?program=${linkId}`),
-      0
-    );
-    return () => window.clearTimeout(t);
-  }, [linkId]);
 
   async function save() {
     setSaving(true);
@@ -1564,8 +1637,8 @@ function SettingsSection({
       <div className="rounded-2xl border-2 border-[#eef2ff] p-3 space-y-2">
         <div className="font-black text-[#27407a]">📷 Validador (kiosko)</div>
         <p className="text-xs text-[#6b7aa0] font-semibold">
-          Abre este enlace en la tablet de registro y escribe la clave para
-          empezar a validar caras de este programa.
+          En la tablet, entra a la <b>pantalla principal</b> del sitio y escribe
+          esta clave en “Validar ingreso” para validar caras de este programa.
         </p>
         <div>
           <label className="label-game">Clave del validador</label>
@@ -1590,22 +1663,6 @@ function SettingsSection({
             Guarda para aplicar el cambio de clave.
           </p>
         </div>
-        {validadorUrl && (
-          <button
-            onClick={() => {
-              navigator.clipboard?.writeText(validadorUrl).then(
-                () => {
-                  setCopied(true);
-                  window.setTimeout(() => setCopied(false), 1500);
-                },
-                () => {}
-              );
-            }}
-            className="text-xs font-bold text-[#4f7cff] break-all text-left"
-          >
-            {copied ? "✅ Copiado" : `🔗 ${validadorUrl}`}
-          </button>
-        )}
       </div>
 
       {error && (
