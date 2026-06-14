@@ -11,12 +11,15 @@ import {
   pendingCount,
   setKioskToken,
   getKioskToken,
-  loadTodayRuts,
   searchStudents,
+  loadProgramContext,
+  markProgramRecord,
   type StudentSearchResult,
+  type ProgramContext,
 } from "@/lib/kiosk";
 import { formatRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
+import { playStatusSound, primeAudio } from "@/lib/sound";
 
 type ResultType = "green" | "already" | "red" | "unknown" | null;
 
@@ -34,6 +37,13 @@ export default function ValidarPage() {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const facingModeRef = useRef<"user" | "environment">("user");
+  // Destino al pulsar "Inicio/Volver": vuelve al mantenedor solo si se llegó
+  // desde ahí (?from=mantenedor); en cualquier otro caso vuelve a la portada.
+  const backTargetRef = useRef<"/" | "/mantenedor">("/");
+  // Programa a validar (null = almuerzo, comportamiento clásico con offline).
+  const programRef = useRef<ProgramContext | null>(null);
+  const programIdRef = useRef<string>("");
   const entriesRef = useRef<FaceDescriptorEntry[]>([]);
   const processingRef = useRef(false);
   const cooldownUntilRef = useRef(0);
@@ -55,9 +65,17 @@ export default function ValidarPage() {
   const [tokenInput, setTokenInput] = useState("");
   const [showManual, setShowManual] = useState(false);
   const [modelReady, setModelReady] = useState(false);
+  const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const [ambiguous, setAmbiguous] = useState<FaceDescriptorEntry[] | null>(
     null
   );
+  // Datos del programa activo para encabezado (vacío = almuerzo).
+  const [programName, setProgramName] = useState("");
+  const [programIcon, setProgramIcon] = useState("🗂️");
+  const [programModalidad, setProgramModalidad] = useState<
+    "temporal" | "puntual"
+  >("temporal");
+  const [programCtx, setProgramCtx] = useState<ProgramContext | null>(null);
 
   // Empieza (una sola vez) la carga del modelo. Puede correr en segundo plano
   // mientras se pide la clave del kiosko.
@@ -88,7 +106,7 @@ export default function ValidarPage() {
 
   const goHome = useCallback(() => {
     stopKiosk();
-    router.push("/");
+    router.push(backTargetRef.current);
   }, [router, stopKiosk]);
 
   const updateAmbiguous = useCallback((entries: FaceDescriptorEntry[] | null) => {
@@ -102,6 +120,7 @@ export default function ValidarPage() {
 
   const showResult = useCallback((r: ResultState) => {
     setResult(r);
+    if (r.type) playStatusSound(r.type);
     cooldownUntilRef.current = Date.now() + COOLDOWN_MS;
     window.setTimeout(() => {
       setResult({ type: null });
@@ -110,6 +129,61 @@ export default function ValidarPage() {
 
   const handleMatchedEntry = useCallback(
     async (entry: FaceDescriptorEntry) => {
+      const prog = programRef.current;
+
+      // --- Modo programa genérico (materiales, tarjetas, etc.) ---
+      if (prog) {
+        if (prog.requiereMembresia && !prog.members.has(entry.rut)) {
+          showResult({
+            type: "red",
+            nombre: entry.nombre,
+            curso: entry.curso,
+            message: "No está en la lista de este programa",
+          });
+          return;
+        }
+        if (prog.registered.has(entry.rut)) {
+          showResult({
+            type: "already",
+            nombre: entry.nombre,
+            curso: entry.curso,
+            message:
+              prog.modalidad === "puntual"
+                ? "Ya recibió su entrega 😊"
+                : "Ya registrado hoy 😊",
+          });
+          return;
+        }
+        prog.registered.add(entry.rut);
+        markedTodayRef.current.add(entry.rut);
+        setCount((c) => c + 1);
+        showResult({
+          type: "green",
+          nombre: entry.nombre,
+          curso: entry.curso,
+          message: prog.modalidad === "puntual" ? "¡Entregar! ✅" : "¡Registrado! ✅",
+        });
+        const res = await markProgramRecord(prog.id, {
+          rut: entry.rut,
+          nombre: entry.nombre,
+          curso: entry.curso,
+          method: "facial",
+        });
+        if (!res.ok) {
+          // Sin cola offline para programas: revertimos si falló.
+          prog.registered.delete(entry.rut);
+          markedTodayRef.current.delete(entry.rut);
+          setCount((c) => Math.max(0, c - 1));
+          showResult({
+            type: "unknown",
+            nombre: entry.nombre,
+            message: "No se pudo registrar. Revisa la conexión.",
+          });
+        }
+        return;
+      }
+
+      // --- Modo almuerzo (clásico, con cola offline) ---
       if (!entry.perteneceAlmuerzo) {
         showResult({
           type: "red",
@@ -180,7 +254,7 @@ export default function ValidarPage() {
 
   const startCamera = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: 640, height: 640 },
+      video: { facingMode: facingModeRef.current, width: 640, height: 640 },
       audio: false,
     });
     streamRef.current = stream;
@@ -190,31 +264,87 @@ export default function ValidarPage() {
     }
   }, []);
 
+  // Cambia entre cámara frontal y trasera (girar cámara).
+  const flipCamera = useCallback(async () => {
+    primeAudio();
+    const next = facingModeRef.current === "user" ? "environment" : "user";
+    facingModeRef.current = next;
+    setFacingMode(next);
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    try {
+      await startCamera();
+    } catch {
+      // Si la cámara pedida no existe, volvemos a la frontal.
+      facingModeRef.current = "user";
+      setFacingMode("user");
+      await startCamera().catch(() => {});
+    }
+  }, [startCamera]);
+
   const init = useCallback(async () => {
     stoppedRef.current = false;
     setPhase("loading");
     // El modelo empieza a cargar desde ya, en paralelo.
     const modelPromise = ensureModel();
     try {
-      // Primero verificamos acceso (token/sesión): así, si falta la clave,
-      // mostramos la pantalla de inmediato mientras el modelo sigue cargando.
       setStatusText("Verificando acceso...");
+
+      // Si no nos indicaron el programa por la URL, lo resolvemos a partir de
+      // la clave guardada (la que se escribe en la página principal).
+      if (!programIdRef.current) {
+        const token = getKioskToken();
+        if (!token) {
+          setSetupError("");
+          setPhase("setup");
+          return;
+        }
+        try {
+          const r = await fetch(
+            `/api/programs/resolve?clave=${encodeURIComponent(token)}`,
+            { cache: "no-store" }
+          );
+          if (r.ok) {
+            const d = await r.json();
+            programIdRef.current = d.id;
+          } else {
+            const d = await r.json().catch(() => ({}));
+            setSetupError(
+              d.message || "La clave no corresponde a ningún programa."
+            );
+            setPhase("setup");
+            return;
+          }
+        } catch {
+          setSetupError(
+            "Sin conexión para validar la clave. Inténtalo de nuevo."
+          );
+          setPhase("setup");
+          return;
+        }
+      }
+
       const { entries, authError } = await loadDescriptors();
       if (authError && entries.length === 0) {
         setSetupError(
-          getKioskToken()
-            ? "La clave del kiosko no es válida. Verifícala e inténtalo de nuevo."
-            : ""
+          "La clave no es válida o no autoriza este programa. Verifícala."
         );
         setPhase("setup");
         return;
       }
       entriesRef.current = entries;
 
-      // Recordamos quién ya ingresó hoy (sobrevive a recargas de la tablet).
-      const todayRuts = await loadTodayRuts();
-      markedTodayRef.current = new Set(todayRuts);
-      setCount(todayRuts.length);
+      // Recordamos quién ya se registró (sobrevive a recargas de la tablet).
+      const ctx = await loadProgramContext(programIdRef.current);
+      if (ctx) {
+        programRef.current = ctx;
+        setProgramCtx(ctx);
+        setProgramName(ctx.nombre);
+        setProgramIcon(ctx.icono);
+        setProgramModalidad(ctx.modalidad);
+        markedTodayRef.current = new Set(ctx.registered);
+        setCount(ctx.registered.size);
+      }
 
       // Esperamos a que el modelo termine de cargar (suele ya estar listo).
       setStatusText("Cargando modelos de reconocimiento...");
@@ -243,6 +373,21 @@ export default function ValidarPage() {
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
 
+    // Recordamos el origen para que "Volver" regrese al mantenedor si vino de ahí.
+    try {
+      const sp = new URLSearchParams(window.location.search);
+      const from = sp.get("from");
+      backTargetRef.current = from === "mantenedor" ? "/mantenedor" : "/";
+      // Programa a validar (si no viene, se valida el almuerzo clásico).
+      programIdRef.current = sp.get("program") || "";
+    } catch {
+      backTargetRef.current = "/";
+    }
+
+    // Desbloquea el audio en el primer toque/clic del usuario.
+    const unlockAudio = () => primeAudio();
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+
     const startTimer = window.setTimeout(() => {
       setOnline(navigator.onLine);
       // Intentamos iniciar aunque no haya token: puede haber sesión admin activa.
@@ -253,6 +398,7 @@ export default function ValidarPage() {
       window.clearTimeout(startTimer);
       window.removeEventListener("online", goOnline);
       window.removeEventListener("offline", goOffline);
+      window.removeEventListener("pointerdown", unlockAudio);
       if (loopRef.current) clearInterval(loopRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
     };
@@ -261,9 +407,10 @@ export default function ValidarPage() {
 
   function saveTokenAndRetry() {
     if (!tokenInput.trim()) {
-      setSetupError("Escribe la clave del kiosko.");
+      setSetupError("Escribe la clave del programa.");
       return;
     }
+    primeAudio();
     setSetupError("");
     setKioskToken(tokenInput.trim());
     init();
@@ -295,19 +442,21 @@ export default function ValidarPage() {
       <main className="min-h-screen flex items-center justify-center px-5">
         <div className="card p-8 w-full max-w-md animate-pop">
           <div className="text-center mb-5">
-            <div className="text-6xl mb-2">📷</div>
+            <div className="text-6xl mb-2">🔓</div>
             <h1 className="text-2xl font-black text-[#27407a]">
-              Configurar tablet
+              Validar programa
             </h1>
             <p className="text-[#6b7aa0] font-semibold mt-1">
-              Ingresa la clave del kiosko (la entrega el establecimiento)
+              Ingresa la clave del programa (se ve en su configuración)
             </p>
           </div>
           <input
             className="input-game mb-4"
             value={tokenInput}
             onChange={(e) => setTokenInput(e.target.value)}
-            placeholder="Clave del kiosko"
+            placeholder="Clave del programa"
+            autoCapitalize="none"
+            autoCorrect="off"
           />
           {setupError && (
             <div className="mb-4 text-center font-bold text-[#ef4444]">
@@ -361,8 +510,14 @@ export default function ValidarPage() {
               ⏳ {pending} por sincronizar
             </span>
           )}
+          {programName && (
+            <span className="rounded-full px-3 py-1 shadow-sm bg-[#27407a]">
+              {programIcon} {programName}
+            </span>
+          )}
           <span className="rounded-full px-3 py-1 shadow-sm bg-[#5b86ff]">
-            🍽️ {count} hoy
+            {programIcon} {count}{" "}
+            {programModalidad === "puntual" ? "entregas" : "hoy"}
           </span>
         </div>
       </header>
@@ -377,8 +532,22 @@ export default function ValidarPage() {
             ref={videoRef}
             playsInline
             muted
-            className="w-full h-full object-cover -scale-x-100 bg-black"
+            className={`w-full h-full object-cover bg-black ${
+              facingMode === "user" ? "-scale-x-100" : ""
+            }`}
           />
+
+          {/* Botón sutil para girar la cámara (frontal/trasera). */}
+          {phase === "ready" && (
+            <button
+              onClick={flipCamera}
+              aria-label="Girar cámara"
+              title="Girar cámara"
+              className="absolute bottom-3 right-3 z-10 w-11 h-11 rounded-full bg-black/35 hover:bg-black/55 text-white text-xl flex items-center justify-center backdrop-blur-sm transition"
+            >
+              🔄
+            </button>
+          )}
 
           {result.type && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-center backdrop-blur-sm bg-black/25 text-white animate-pop p-4">
@@ -459,10 +628,12 @@ export default function ValidarPage() {
 
       {showManual && (
         <ManualModal
+          program={programCtx}
           onClose={() => setShowManual(false)}
           alreadyMarked={(rut) => markedTodayRef.current.has(rut)}
           onMarked={(rut) => {
             markedTodayRef.current.add(rut);
+            programRef.current?.registered.add(rut);
             setCount((c) => c + 1);
             refreshPending();
           }}
@@ -475,14 +646,21 @@ export default function ValidarPage() {
 // --- Modal de ingreso manual para el docente ---
 // Busca por nombre/apellido y el docente elige el estudiante de la lista.
 function ManualModal({
+  program,
   onClose,
   onMarked,
   alreadyMarked,
 }: {
+  program: ProgramContext | null;
   onClose: () => void;
   onMarked: (rut: string) => void;
   alreadyMarked: (rut: string) => boolean;
 }) {
+  // Elegibilidad según el contexto: membresía del programa o "pertenece almuerzo".
+  const isEligible = (s: StudentSearchResult) =>
+    program
+      ? !program.requiereMembresia || program.members.has(s.rut)
+      : s.perteneceAlmuerzo;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<StudentSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -516,42 +694,53 @@ function ManualModal({
   async function pick(s: StudentSearchResult) {
     setMsg(null);
     const nombreCompleto = fullName(s.nombre, s.apellidos);
-    if (!s.perteneceAlmuerzo) {
+    if (!isEligible(s)) {
       setMsg({
         type: "err",
-        text: `${nombreCompleto} no pertenece al almuerzo. Derivar a Orientación.`,
+        text: program
+          ? `${nombreCompleto} no está en la lista de este programa.`
+          : `${nombreCompleto} no pertenece al almuerzo. Derivar a Orientación.`,
       });
       return;
     }
-    // Ya registrado hoy (en este dispositivo): avisamos sin volver a contar.
+    // Ya registrado (en este dispositivo): avisamos sin volver a contar.
     if (alreadyMarked(s.rut)) {
-      setMsg({ type: "err", text: `🔁 ${nombreCompleto} ya ingresó hoy.` });
+      setMsg({ type: "err", text: `🔁 ${nombreCompleto} ya estaba registrado.` });
       return;
     }
     setMarking(s.rut);
     try {
-      const res = await markAttendance({
-        rut: s.rut,
-        nombre: nombreCompleto,
-        curso: s.curso || "",
-        method: "manual",
-      });
-      // El servidor también detecta duplicados del día (no sumamos doble).
+      const res = program
+        ? await markProgramRecord(program.id, {
+            rut: s.rut,
+            nombre: nombreCompleto,
+            curso: s.curso || "",
+            method: "manual",
+          })
+        : await markAttendance({
+            rut: s.rut,
+            nombre: nombreCompleto,
+            curso: s.curso || "",
+            method: "manual",
+          });
+      // El servidor también detecta duplicados (no sumamos doble).
       if (res.duplicate) {
-        setMsg({ type: "err", text: `🔁 ${nombreCompleto} ya ingresó hoy.` });
+        setMsg({ type: "err", text: `🔁 ${nombreCompleto} ya estaba registrado.` });
         return;
       }
-      if (res.ok) {
-        onMarked(s.rut);
-        setMsg({
-          type: "ok",
-          text: `✅ ${nombreCompleto} registrado${
-            res.offline ? " (offline, se sincronizará)" : ""
-          }`,
-        });
-        setQuery("");
-        setResults([]);
+      if (!res.ok) {
+        setMsg({ type: "err", text: "No se pudo registrar. Revisa la conexión." });
+        return;
       }
+      onMarked(s.rut);
+      setMsg({
+        type: "ok",
+        text: `✅ ${nombreCompleto} registrado${
+          "offline" in res && res.offline ? " (offline, se sincronizará)" : ""
+        }`,
+      });
+      setQuery("");
+      setResults([]);
     } catch {
       setMsg({ type: "err", text: "Error. Inténtalo de nuevo." });
     } finally {
@@ -613,7 +802,7 @@ function ManualModal({
                 className={`text-left rounded-2xl p-3 border-2 transition flex items-center justify-between gap-2 disabled:opacity-60 ${
                   yaIngreso
                     ? "bg-[#eef6ff] border-[#bfe0ff]"
-                    : s.perteneceAlmuerzo
+                    : isEligible(s)
                     ? "bg-[#f4f8ff] border-[#eef2ff] hover:border-[#4f7cff]"
                     : "bg-[#fff5f5] border-[#ffd7d7]"
                 }`}
@@ -631,7 +820,7 @@ function ManualModal({
                     ? "…"
                     : yaIngreso
                     ? "🔁 Ya ingresó"
-                    : s.perteneceAlmuerzo
+                    : isEligible(s)
                     ? "Ingresar →"
                     : "🛑"}
                 </span>

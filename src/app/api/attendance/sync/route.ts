@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { normalizeRut } from "@/lib/rut";
+import { dateInTZ } from "@/lib/date";
 
 function authorized(req: NextRequest, session: unknown): boolean {
   if (session) return true;
@@ -39,7 +40,8 @@ export async function POST(req: NextRequest) {
   for (const r of records) {
     if (!r.rut) continue;
     const norm = normalizeRut(r.rut);
-    const fecha = r.fecha || (r.timestamp || new Date().toISOString()).slice(0, 10);
+    const fecha =
+      r.fecha || dateInTZ(r.timestamp ? new Date(r.timestamp) : new Date());
 
     const exists = await db
       .collection("attendance")

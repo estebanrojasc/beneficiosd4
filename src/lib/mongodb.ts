@@ -61,7 +61,56 @@ function getClientPromise(): Promise<MongoClient> {
   return clientPromise;
 }
 
+let indexesPromise: Promise<void> | null = null;
+
+// Garantiza a nivel de base de datos las reglas de unicidad:
+// - Un RUT único por estudiante y por entrada de la Lista almuerzo.
+// - Un curso único por nombre + año.
+// Se ejecuta una sola vez por proceso. Si ya existen duplicados, la creación
+// del índice puede fallar; lo registramos sin romper la app (la validación a
+// nivel de aplicación sigue protegiendo).
+async function ensureIndexes(db: Db): Promise<void> {
+  if (!indexesPromise) {
+    indexesPromise = (async () => {
+      try {
+        await db
+          .collection("students")
+          .createIndex({ rut: 1 }, { unique: true });
+        await db
+          .collection("allowedRuts")
+          .createIndex({ rut: 1 }, { unique: true });
+        await db
+          .collection("cursos")
+          .createIndex({ nombre: 1, anio: 1 }, { unique: true });
+        await db
+          .collection("users")
+          .createIndex({ username: 1 }, { unique: true });
+        // Programas: un RUT no se repite dentro del mismo programa.
+        await db
+          .collection("program_members")
+          .createIndex({ programId: 1, rut: 1 }, { unique: true });
+        // Registros: índice de apoyo para consultas por programa/fecha/rut.
+        await db
+          .collection("program_records")
+          .createIndex({ programId: 1, fecha: 1, rut: 1 });
+        await db
+          .collection("programs")
+          .createIndex({ slug: 1 }, { sparse: true });
+      } catch (err) {
+        console.warn(
+          "[mongodb] No se pudieron crear todos los índices únicos. " +
+            "Revisa si hay datos duplicados.",
+          err
+        );
+      }
+    })();
+  }
+  return indexesPromise;
+}
+
 export async function getDb(): Promise<Db> {
   const c = await getClientPromise();
-  return c.db(dbName);
+  const db = c.db(dbName);
+  await ensureIndexes(db);
+  return db;
 }

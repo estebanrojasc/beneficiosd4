@@ -2,23 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { fullName } from "@/lib/curso";
+import { isKioskTokenValid } from "@/lib/programs";
 
 // Entrega los descriptores de los estudiantes enrolados para que el kiosko
 // pueda reconocer caras incluso sin internet (se cachean en el dispositivo).
-// Acceso: sesión de admin o token de kiosko (env KIOSK_TOKEN).
+// Acceso: sesión de admin, token global (KIOSK_TOKEN) o clave de un programa.
 export async function GET(req: NextRequest) {
   const session = await getSession();
   const token =
     req.headers.get("x-kiosk-token") ||
     req.nextUrl.searchParams.get("token") ||
     "";
-  const kioskToken = process.env.KIOSK_TOKEN || "kiosko2026";
 
-  if (!session && token !== kioskToken) {
+  const db = await getDb();
+
+  if (!session && !(await isKioskTokenValid(db, token))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
-  const db = await getDb();
   const docs = await db
     .collection("students")
     .find({ enrolled: true, faceDescriptor: { $ne: null } })

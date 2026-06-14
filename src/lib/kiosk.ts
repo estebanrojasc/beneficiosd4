@@ -1,6 +1,7 @@
 "use client";
 
 import type { FaceDescriptorEntry } from "./types";
+import { dateInTZ } from "./date";
 import {
   saveDescriptors,
   getDescriptors,
@@ -72,7 +73,7 @@ export async function loadDescriptors(): Promise<{
 }
 
 function todayStr() {
-  return new Date().toISOString().slice(0, 10);
+  return dateInTZ();
 }
 
 // Marca asistencia: intenta online; si falla, la guarda en la cola offline.
@@ -127,6 +128,91 @@ export async function syncQueue(): Promise<number> {
 
 export async function pendingCount(): Promise<number> {
   return (await getQueue()).length;
+}
+
+// --- Validación por programa (genérico) --------------------------------------
+
+export interface ProgramContext {
+  id: string;
+  nombre: string;
+  icono: string;
+  modalidad: "temporal" | "puntual";
+  requiereMembresia: boolean;
+  members: Set<string>;
+  registered: Set<string>;
+}
+
+// Carga el contexto de un programa para validar en el kiosko: info, miembros
+// (si requiere lista) y los RUT ya registrados.
+export async function loadProgramContext(
+  id: string
+): Promise<ProgramContext | null> {
+  const token = getKioskToken();
+  const headers = { "x-kiosk-token": token };
+  try {
+    const pRes = await fetch(`/api/programs/${id}`, { headers, cache: "no-store" });
+    if (!pRes.ok) return null;
+    const p = await pRes.json();
+
+    const members = new Set<string>();
+    if (p.requiereMembresia) {
+      const mRes = await fetch(`/api/programs/${id}/members`, {
+        headers,
+        cache: "no-store",
+      });
+      if (mRes.ok) {
+        const list = await mRes.json();
+        for (const m of list) members.add(m.rut);
+      }
+    }
+
+    const registered = new Set<string>();
+    const rRes = await fetch(`/api/programs/${id}/records`, {
+      headers,
+      cache: "no-store",
+    });
+    if (rRes.ok) {
+      const data = await rRes.json();
+      for (const r of data.ruts || []) registered.add(r);
+    }
+
+    return {
+      id,
+      nombre: p.nombre,
+      icono: p.icono,
+      modalidad: p.modalidad,
+      requiereMembresia: p.requiereMembresia,
+      members,
+      registered,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Registra una marca en un programa (sin cola offline; requiere conexión).
+export async function markProgramRecord(
+  programId: string,
+  rec: {
+    rut: string;
+    nombre: string;
+    curso: string;
+    method: "facial" | "manual";
+  }
+): Promise<{ ok: boolean; duplicate?: boolean; error?: string }> {
+  const token = getKioskToken();
+  try {
+    const res = await fetch(`/api/programs/${programId}/records`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-kiosk-token": token },
+      body: JSON.stringify({ ...rec, timestamp: new Date().toISOString() }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, error: data.error || "server" };
+    return { ok: true, duplicate: Boolean(data.duplicate) };
+  } catch {
+    return { ok: false, error: "offline" };
+  }
 }
 
 // Lista de RUTs que ya ingresaron hoy (servidor + cola offline).

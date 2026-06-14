@@ -9,8 +9,8 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Almuerzo Escolar",
-  description: "Validación facial de ingreso al almuerzo",
+  title: "Registro Escolar",
+  description: "Listas y validación con reconocimiento facial",
   manifest: "/manifest.webmanifest",
 };
 

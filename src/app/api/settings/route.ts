@@ -20,6 +20,12 @@ export async function PUT(req: NextRequest) {
   if (body.enrolamientoAbierto !== undefined) {
     patch.enrolamientoAbierto = Boolean(body.enrolamientoAbierto);
   }
+  if (body.umbralAsistencia !== undefined) {
+    patch.umbralAsistencia = Number(body.umbralAsistencia);
+  }
+  if (body.umbralCaraDuplicada !== undefined) {
+    patch.umbralCaraDuplicada = Number(body.umbralCaraDuplicada);
+  }
 
   const db = await getDb();
   await saveSettings(db, patch);

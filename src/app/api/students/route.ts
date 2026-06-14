@@ -4,6 +4,10 @@ import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { isValidRut, normalizeRut } from "@/lib/rut";
 import { resolveCursoYear, linkStudentToCurso } from "@/lib/cursoServer";
+import { syncAllowedRut } from "@/lib/allowedRutsServer";
+import { findDuplicateFace } from "@/lib/faceMatchServer";
+import { getSettings } from "@/lib/settings";
+import { fullName } from "@/lib/curso";
 
 interface StudentDoc {
   _id?: ObjectId;
@@ -72,6 +76,9 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const { nombre, apellidos, curso, rut, perteneceAlmuerzo, faceDescriptor } =
     body as Partial<StudentDoc>;
+  // El docente puede confirmar un enrolamiento aunque la cara se parezca mucho
+  // a otra (caso de gemelos/hermanos): para eso envía force = true.
+  const force = Boolean((body as { force?: boolean }).force);
 
   if (!nombre || !apellidos || !curso || !rut) {
     return NextResponse.json(
@@ -94,6 +101,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // No se permite enrolar dos veces la misma cara (salvo confirmación explícita).
+  if (Array.isArray(faceDescriptor) && faceDescriptor.length > 0 && !force) {
+    const { umbralCaraDuplicada } = await getSettings(db);
+    const dup = await findDuplicateFace(
+      db,
+      faceDescriptor,
+      normRut,
+      umbralCaraDuplicada
+    );
+    if (dup) {
+      return NextResponse.json(
+        {
+          error: "DUPLICATE_FACE",
+          match: {
+            nombre: fullName(dup.nombre, dup.apellidos),
+            curso: dup.curso,
+            score: Math.round(dup.score * 100),
+          },
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   // El año se hereda del curso seleccionado.
   const anioFinal = await resolveCursoYear(db, curso);
 
@@ -113,5 +144,13 @@ export async function POST(req: NextRequest) {
 
   const res = await db.collection<StudentDoc>("students").insertOne(doc);
   await linkStudentToCurso(db, res.insertedId, curso.trim());
+  // La marca "pertenece almuerzo" se refleja en la Lista almuerzo.
+  await syncAllowedRut(db, {
+    rut: normRut,
+    perteneceAlmuerzo: doc.perteneceAlmuerzo,
+    nombre: doc.nombre,
+    apellidos: doc.apellidos,
+    curso: doc.curso,
+  });
   return NextResponse.json({ ok: true, _id: res.insertedId.toString() });
 }

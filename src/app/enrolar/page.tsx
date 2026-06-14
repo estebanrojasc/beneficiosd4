@@ -86,6 +86,13 @@ export default function EnrolarPage() {
           setStep("blocked");
           return;
         }
+        if (data.error === "DUPLICATE_FACE") {
+          setError(
+            data.message ||
+              "Esta cara ya está enrolada con otro RUT. Acércate a un docente."
+          );
+          return;
+        }
         setError(data.error || "No se pudo enrolar.");
         return;
       }
@@ -105,7 +112,7 @@ export default function EnrolarPage() {
             <div className="text-center mb-5">
               <div className="text-6xl mb-2">✋</div>
               <h1 className="text-2xl font-black text-[#27407a]">
-                Enrólate al almuerzo
+                Registra tu cara
               </h1>
               <p className="text-[#6b7aa0] font-semibold mt-1">
                 Primero, escribe tu RUT
@@ -143,7 +150,7 @@ export default function EnrolarPage() {
           <form onSubmit={submit} className="card p-7 animate-pop">
             <div className="text-center mb-4">
               <h1 className="text-2xl font-black text-[#27407a]">
-                {guest ? "Completa tu enrolamiento 📝" : "¡Genial! Estás en la lista 🎉"}
+                {guest ? "Completa tu enrolamiento 📝" : "¡Listo para registrar tu cara! 🎉"}
               </h1>
               <p className="text-[#6b7aa0] font-semibold mt-1">
                 Completa los datos que falten y captura tu cara
@@ -153,9 +160,9 @@ export default function EnrolarPage() {
             {guest && (
               <div className="mb-4 rounded-2xl bg-[#fff8e6] border-2 border-[#ffe08a] p-3 text-center">
                 <p className="font-bold text-[#8a6d1a] text-sm">
-                  ⚠️ Tu RUT no está en el listado de almuerzo. Puedes enrolarte,
-                  pero <strong>esto no asegura tu acceso al almuerzo</strong>. Si
-                  necesitas el beneficio, acércate a Orientación.
+                  ⚠️ Tu RUT no está cargado. Puedes registrar tu cara, pero{" "}
+                  <strong>esto no te agrega a ningún programa</strong>. Si
+                  necesitas un beneficio, acércate a Orientación.
                 </p>
               </div>
             )}
@@ -238,8 +245,8 @@ export default function EnrolarPage() {
               ¡Listo!
             </h1>
             <p className="text-[#5b6b94] font-semibold text-lg">
-              Ya estás enrolado. Ahora puedes ingresar al almuerzo mostrando tu
-              cara en la tablet de la entrada.
+              Ya registraste tu cara. Cuando participes en un programa, podrás
+              validarte mostrando tu cara en la tablet.
             </p>
             <Link href="/" className="btn-game btn-blue w-full mt-6">
               Volver al inicio

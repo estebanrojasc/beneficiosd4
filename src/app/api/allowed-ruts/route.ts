@@ -26,8 +26,29 @@ export async function GET(req: NextRequest) {
     .limit(2000)
     .toArray();
 
+  // Enriquecemos con el estado de enrolamiento y el curso efectivo del estudiante,
+  // para poder enrolar y agrupar por curso desde la Lista almuerzo.
+  const ruts = docs.map((d) => d.rut);
+  const students = await db
+    .collection("students")
+    .find({ rut: { $in: ruts } })
+    .project({ rut: 1, nombre: 1, apellidos: 1, curso: 1, enrolled: 1 })
+    .toArray();
+  const studentByRut = new Map(students.map((s) => [s.rut, s]));
+
   return NextResponse.json(
-    docs.map((d) => ({ ...d, _id: d._id?.toString() }))
+    docs.map((d) => {
+      const s = studentByRut.get(d.rut);
+      return {
+        _id: d._id?.toString(),
+        rut: d.rut,
+        nombre: d.nombre || s?.nombre || "",
+        apellidos: d.apellidos || s?.apellidos || "",
+        // El curso del estudiante prevalece (es el dato más actualizado).
+        curso: s?.curso || d.curso || "",
+        enrolled: Boolean(s?.enrolled),
+      };
+    })
   );
 }
 

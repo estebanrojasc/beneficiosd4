@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { normalizeRut } from "@/lib/rut";
+import { dateInTZ } from "@/lib/date";
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return dateInTZ();
 }
 
 function authorized(req: NextRequest, session: unknown): boolean {

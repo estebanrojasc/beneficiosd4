@@ -164,9 +164,9 @@ export default function CursosTab() {
               disabled={!usaNivel}
               onChange={(e) => setNivel(Number(e.target.value))}
             >
-              {!usaNivel ? (
-                <option value="">—</option>
-              ) : (
+              {/* Prekínder/Kínder no usan número: el selector queda deshabilitado. */}
+              {!usaNivel && <option value="">Sin nivel</option>}
+              {usaNivel &&
                 Array.from(
                   { length: nivelMax - nivelMin + 1 },
                   (_, i) => nivelMin + i
@@ -174,8 +174,7 @@ export default function CursosTab() {
                   <option key={n} value={n}>
                     {n}°
                   </option>
-                ))
-              )}
+                ))}
             </select>
           </div>
           <div>
@@ -324,15 +323,6 @@ export default function CursosTab() {
                     </div>
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    <span
-                      className={`text-xs font-bold rounded-full px-2 py-0.5 ${
-                        s.perteneceAlmuerzo
-                          ? "bg-green-100 text-green-700"
-                          : "bg-red-100 text-red-600"
-                      }`}
-                    >
-                      {s.perteneceAlmuerzo ? "Almuerzo ✓" : "Sin almuerzo"}
-                    </span>
                     <span
                       className={`text-xs font-bold rounded-full px-2 py-0.5 ${
                         s.enrolled

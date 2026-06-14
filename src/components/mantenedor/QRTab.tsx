@@ -59,7 +59,7 @@ export default function QRTab() {
     if (!dataUrl) return;
     const a = document.createElement("a");
     a.href = dataUrl;
-    a.download = "qr-enrolamiento-almuerzo.png";
+    a.download = "qr-enrolamiento.png";
     a.click();
   }
 
@@ -67,9 +67,9 @@ export default function QRTab() {
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`
-      <html><head><title>QR Enrolamiento Almuerzo</title></head>
+      <html><head><title>QR Enrolamiento</title></head>
       <body style="text-align:center;font-family:sans-serif;padding:40px">
-        <h1 style="color:#27407a">Enrólate al almuerzo 🍽️</h1>
+        <h1 style="color:#27407a">Enróla tu cara 🪪</h1>
         <p style="font-size:18px;color:#444">Escanea el código con tu celular</p>
         <img src="${dataUrl}" style="width:420px;height:420px" />
         <p style="color:#666">${baseUrl}</p>
@@ -87,8 +87,9 @@ export default function QRTab() {
           QR de auto-enrolamiento
         </h2>
         <p className="text-[#6b7aa0] font-semibold mt-1 mb-5">
-          Imprime este código para que los estudiantes más grandes se enrolen
-          desde su celular. El sistema valida su RUT automáticamente.
+          Imprime este código para que los estudiantes más grandes registren su
+          cara desde su celular. El sistema valida su RUT automáticamente. El
+          enrolamiento solo registra la identidad; no agrega a ningún programa.
         </p>
 
         {dataUrl ? (
@@ -143,9 +144,9 @@ export default function QRTab() {
                 Permitir que cualquiera se enrole
               </span>
               <span className="block text-sm text-[#6b7aa0] font-semibold mt-0.5">
-                Si está activo, cualquier estudiante puede enrolarse aunque su
-                RUT no esté en el listado. Se le avisa que{" "}
-                <strong>esto no asegura su acceso al almuerzo</strong>.
+                Si está activo, cualquier estudiante puede registrar su cara
+                aunque su RUT no esté cargado. Se le avisa que{" "}
+                <strong>esto no lo agrega a ningún programa</strong>.
               </span>
             </span>
           </label>

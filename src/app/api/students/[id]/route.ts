@@ -8,6 +8,10 @@ import {
   linkStudentToCurso,
   unlinkStudentFromCursos,
 } from "@/lib/cursoServer";
+import { syncAllowedRut } from "@/lib/allowedRutsServer";
+import { findDuplicateFace } from "@/lib/faceMatchServer";
+import { getSettings } from "@/lib/settings";
+import { fullName } from "@/lib/curso";
 
 export async function PUT(
   req: NextRequest,
@@ -22,6 +26,7 @@ export async function PUT(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const body = await req.json().catch(() => ({}));
+  const force = Boolean(body.force);
   const update: Record<string, unknown> = { updatedAt: new Date().toISOString() };
 
   if (typeof body.nombre === "string") update.nombre = body.nombre.trim();
@@ -39,6 +44,38 @@ export async function PUT(
   }
 
   const db = await getDb();
+
+  // No se permite re-enrolar con una cara idéntica a la de otro estudiante.
+  if (
+    Array.isArray(body.faceDescriptor) &&
+    body.faceDescriptor.length > 0 &&
+    !force
+  ) {
+    const current = await db
+      .collection("students")
+      .findOne({ _id: new ObjectId(id) }, { projection: { rut: 1 } });
+    const ownRut = (update.rut as string) || current?.rut || "";
+    const { umbralCaraDuplicada } = await getSettings(db);
+    const dup = await findDuplicateFace(
+      db,
+      body.faceDescriptor,
+      ownRut,
+      umbralCaraDuplicada
+    );
+    if (dup) {
+      return NextResponse.json(
+        {
+          error: "DUPLICATE_FACE",
+          match: {
+            nombre: fullName(dup.nombre, dup.apellidos),
+            curso: dup.curso,
+            score: Math.round(dup.score * 100),
+          },
+        },
+        { status: 409 }
+      );
+    }
+  }
 
   // Al cambiar de curso, el año se hereda del curso.
   if (typeof body.curso === "string") {
@@ -58,6 +95,23 @@ export async function PUT(
     await linkStudentToCurso(db, new ObjectId(id), body.curso.trim());
   }
 
+  // Reflejamos la marca "pertenece almuerzo" en la Lista almuerzo.
+  const saved = await db
+    .collection("students")
+    .findOne(
+      { _id: new ObjectId(id) },
+      { projection: { rut: 1, nombre: 1, apellidos: 1, curso: 1, perteneceAlmuerzo: 1 } }
+    );
+  if (saved?.rut) {
+    await syncAllowedRut(db, {
+      rut: saved.rut,
+      perteneceAlmuerzo: Boolean(saved.perteneceAlmuerzo),
+      nombre: saved.nombre,
+      apellidos: saved.apellidos,
+      curso: saved.curso,
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -74,7 +128,18 @@ export async function DELETE(
     return NextResponse.json({ error: "ID inválido" }, { status: 400 });
 
   const db = await getDb();
+  // Recuperamos el RUT antes de borrar para limpiar sus listas asociadas.
+  const doc = await db
+    .collection("students")
+    .findOne({ _id: new ObjectId(id) }, { projection: { rut: 1 } });
   await db.collection("students").deleteOne({ _id: new ObjectId(id) });
   await unlinkStudentFromCursos(db, new ObjectId(id));
+
+  // Al borrar al estudiante, queda fuera de la Lista almuerzo y de cualquier
+  // membresía de programa (no debe quedar como autorizado "fantasma").
+  if (doc?.rut) {
+    await db.collection("allowedRuts").deleteOne({ rut: doc.rut });
+    await db.collection("program_members").deleteMany({ rut: doc.rut });
+  }
   return NextResponse.json({ ok: true });
 }

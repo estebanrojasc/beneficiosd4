@@ -99,15 +99,6 @@ export default function StudentsTab() {
               <div className="flex gap-2 mt-1">
                 <span
                   className={`text-xs font-bold rounded-full px-2 py-0.5 ${
-                    s.perteneceAlmuerzo
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-600"
-                  }`}
-                >
-                  {s.perteneceAlmuerzo ? "Almuerzo ✓" : "Sin almuerzo"}
-                </span>
-                <span
-                  className={`text-xs font-bold rounded-full px-2 py-0.5 ${
                     s.enrolled
                       ? "bg-blue-100 text-blue-700"
                       : "bg-gray-100 text-gray-500"

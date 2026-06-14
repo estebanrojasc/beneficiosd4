@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
+import { getSession } from "@/lib/auth";
 import { isValidRut, normalizeRut } from "@/lib/rut";
 import { getSettings } from "@/lib/settings";
 import { resolveCursoYear, linkStudentToCurso } from "@/lib/cursoServer";
+import { findDuplicateFace } from "@/lib/faceMatchServer";
 
 // Endpoint PÚBLICO de auto-enrolamiento (formulario al que se llega por QR).
 export async function POST(req: NextRequest) {
@@ -27,12 +29,44 @@ export async function POST(req: NextRequest) {
   const norm = normalizeRut(rut);
   const db = await getDb();
 
+  // Solo un docente con sesión puede confirmar caras muy parecidas (gemelos).
+  const session = await getSession();
+  const force = Boolean((body as { force?: boolean }).force) && Boolean(session);
+
   const allowed = await db.collection("allowedRuts").findOne({ rut: norm });
-  const { enrolamientoAbierto } = await getSettings(db);
+  const { enrolamientoAbierto, umbralCaraDuplicada } = await getSettings(db);
+
+  // Evita que una misma cara se enrole bajo dos RUT distintos (suplantación).
+  if (!force) {
+    const dup = await findDuplicateFace(
+      db,
+      faceDescriptor,
+      norm,
+      umbralCaraDuplicada
+    );
+    if (dup) {
+      return NextResponse.json(
+        {
+          error: "DUPLICATE_FACE",
+          // Para el docente incluimos a quién se parece; para el público, no.
+          match: session
+            ? { nombre: dup.nombre, curso: dup.curso, score: Math.round(dup.score * 100) }
+            : undefined,
+          message:
+            "Esta cara ya está enrolada con otro RUT. Si crees que es un error " +
+            "(por ejemplo, tienes un hermano o gemelo muy parecido), acércate a " +
+            "un docente para enrolarte.",
+        },
+        { status: 409 }
+      );
+    }
+  }
 
   // Si no está en el listado autorizado, solo puede enrolarse cuando el
   // enrolamiento abierto está activo (y sin garantizar el almuerzo).
-  if (!allowed && !enrolamientoAbierto) {
+  // Un docente con sesión puede enrolar a cualquiera (p. ej. miembros de otros
+  // programas que no pertenecen al almuerzo).
+  if (!allowed && !enrolamientoAbierto && !session) {
     return NextResponse.json(
       {
         error: "NOT_ALLOWED",
