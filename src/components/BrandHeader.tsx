@@ -11,7 +11,7 @@ export default function BrandHeader({
   fallbackEmoji: string;
   subtitle: string;
 }) {
-  const { name, hasLogo } = useBranding();
+  const { name, hasLogo, logoVersion } = useBranding();
   return (
     <div className="text-center mb-8 animate-pop">
       <div className="mb-3 flex justify-center">
@@ -19,6 +19,7 @@ export default function BrandHeader({
           hasLogo={hasLogo}
           fallback={fallbackEmoji}
           size={hasLogo ? 104 : 96}
+          version={logoVersion}
         />
       </div>
       <h1 className="text-4xl sm:text-5xl font-black tracking-tight text-[#27407a]">

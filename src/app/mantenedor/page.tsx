@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import StudentsTab from "@/components/mantenedor/StudentsTab";
-import CursosTab from "@/components/mantenedor/CursosTab";
-import QRTab from "@/components/mantenedor/QRTab";
-import AjustesTab from "@/components/mantenedor/AjustesTab";
-import ProgramasTab from "@/components/mantenedor/ProgramasTab";
-import UsuariosTab from "@/components/mantenedor/UsuariosTab";
-import RolesTab from "@/components/mantenedor/RolesTab";
+import dynamic from "next/dynamic";
 import { useBranding, BrandLogo } from "@/components/Brand";
 import type { CapKey, RoleCaps } from "@/lib/types";
 
@@ -60,6 +54,43 @@ const ALL_TABS: Tab[] = [
 
 const STORAGE_KEY = "mantenedor:nav";
 
+function TabLoading() {
+  return (
+    <div className="card p-6 text-center text-[#5b6b94] font-extrabold animate-pulse">
+      Cargando sección...
+    </div>
+  );
+}
+
+const ProgramasTab = dynamic(
+  () => import("@/components/mantenedor/ProgramasTab"),
+  { loading: () => <TabLoading />, ssr: false }
+);
+const QRTab = dynamic(() => import("@/components/mantenedor/QRTab"), {
+  loading: () => <TabLoading />,
+  ssr: false,
+});
+const StudentsTab = dynamic(
+  () => import("@/components/mantenedor/StudentsTab"),
+  { loading: () => <TabLoading />, ssr: false }
+);
+const CursosTab = dynamic(() => import("@/components/mantenedor/CursosTab"), {
+  loading: () => <TabLoading />,
+  ssr: false,
+});
+const UsuariosTab = dynamic(
+  () => import("@/components/mantenedor/UsuariosTab"),
+  { loading: () => <TabLoading />, ssr: false }
+);
+const RolesTab = dynamic(() => import("@/components/mantenedor/RolesTab"), {
+  loading: () => <TabLoading />,
+  ssr: false,
+});
+const AjustesTab = dynamic(
+  () => import("@/components/mantenedor/AjustesTab"),
+  { loading: () => <TabLoading />, ssr: false }
+);
+
 // Lee la última sección/pestaña usada (para volver al mismo lugar tras Validar).
 function getInitialNav(): { section: Section; tab: Tab } {
   const fallback: { section: Section; tab: Tab } = {
@@ -87,7 +118,7 @@ function getInitialNav(): { section: Section; tab: Tab } {
 
 export default function MantenedorPage() {
   const router = useRouter();
-  const { name, hasLogo } = useBranding();
+  const { name, hasLogo, logoVersion } = useBranding();
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [caps, setCaps] = useState<RoleCaps | null>(null);
   const [section, setSection] = useState<Section>(() => getInitialNav().section);
@@ -179,7 +210,12 @@ export default function MantenedorPage() {
     <main className="min-h-screen">
       <header className="sticky top-0 z-30 bg-white/90 backdrop-blur border-b-2 border-[#eef2ff] px-4 py-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <BrandLogo hasLogo={hasLogo} fallback="🍽️" size={32} />
+          <BrandLogo
+            hasLogo={hasLogo}
+            fallback="🍽️"
+            size={32}
+            version={logoVersion}
+          />
           <div className="min-w-0">
             <h1 className="text-xl font-black text-[#27407a] truncate leading-tight">
               {name || "Mantenedor"}

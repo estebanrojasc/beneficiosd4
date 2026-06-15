@@ -12,6 +12,34 @@ interface Props {
   emptyLabel?: string;
 }
 
+let cursosCache: Curso[] | null = null;
+let cursosPromise: Promise<Curso[]> | null = null;
+
+function loadCursosOnce(): Promise<Curso[]> {
+  if (cursosCache) return Promise.resolve(cursosCache);
+  if (!cursosPromise) {
+    cursosPromise = fetch("/api/cursos")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        cursosCache = Array.isArray(data) ? data : [];
+        return cursosCache;
+      })
+      .catch(() => {
+        cursosCache = [];
+        return cursosCache;
+      })
+      .finally(() => {
+        cursosPromise = null;
+      });
+  }
+  return cursosPromise;
+}
+
+export function clearCursoSelectCache() {
+  cursosCache = null;
+  cursosPromise = null;
+}
+
 // Combobox con búsqueda, pensado para muchos cursos (~30+).
 // Agrupa por ciclo y permite filtrar escribiendo.
 export default function CursoSelect({
@@ -20,18 +48,24 @@ export default function CursoSelect({
   className = "input-game",
   emptyLabel = "Selecciona un curso",
 }: Props) {
-  const [cursos, setCursos] = useState<Curso[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [cursos, setCursos] = useState<Curso[]>(() => cursosCache || []);
+  const [loading, setLoading] = useState(!cursosCache);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch("/api/cursos")
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setCursos(Array.isArray(data) ? data : []))
-      .catch(() => setCursos([]))
-      .finally(() => setLoading(false));
+    let active = true;
+    loadCursosOnce()
+      .then((data) => {
+        if (active) setCursos(data);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {

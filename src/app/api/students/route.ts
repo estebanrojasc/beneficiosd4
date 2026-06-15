@@ -23,7 +23,7 @@ interface StudentDoc {
   updatedAt: string;
 }
 
-function serialize(doc: StudentDoc) {
+function serialize(doc: StudentDoc | Omit<StudentDoc, "faceDescriptor">) {
   return {
     ...doc,
     _id: doc._id?.toString(),
@@ -41,6 +41,12 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim();
   const anioParam = req.nextUrl.searchParams.get("anio");
   const cursoParam = req.nextUrl.searchParams.get("curso")?.trim();
+  const limitParam = Number(req.nextUrl.searchParams.get("limit"));
+  const skipParam = Number(req.nextUrl.searchParams.get("skip"));
+  const limit = Number.isFinite(limitParam)
+    ? Math.min(Math.max(1, limitParam), 200)
+    : 60;
+  const skip = Number.isFinite(skipParam) ? Math.max(0, skipParam) : 0;
   const filter: Record<string, unknown> = {};
   if (q) {
     filter.$or = [
@@ -58,14 +64,25 @@ export async function GET(req: NextRequest) {
     if (Number.isFinite(anio)) filter.anio = anio;
   }
 
-  const docs = await db
-    .collection<StudentDoc>("students")
-    .find(filter)
-    .sort({ nombre: 1 })
-    .limit(500)
-    .toArray();
+  const coll = db.collection<StudentDoc>("students");
+  const [total, docs] = await Promise.all([
+    coll.countDocuments(filter),
+    coll
+      .find(filter)
+      // El descriptor facial es pesado y sensible; no hace falta leerlo para
+      // listados, búsquedas ni filtros de curso.
+      .project<Omit<StudentDoc, "faceDescriptor">>({ faceDescriptor: 0 })
+      .sort({ nombre: 1 })
+      .skip(skip)
+      .limit(limit)
+      .toArray(),
+  ]);
 
-  return NextResponse.json(docs.map(serialize));
+  return NextResponse.json({
+    items: docs.map(serialize),
+    total,
+    hasMore: skip + docs.length < total,
+  });
 }
 
 export async function POST(req: NextRequest) {

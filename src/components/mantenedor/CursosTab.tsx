@@ -10,6 +10,7 @@ import {
 } from "@/lib/curso";
 import type { Curso } from "@/lib/curso";
 import { formatRut } from "@/lib/rut";
+import { fetchStudentsPage } from "@/lib/studentsClient";
 
 interface CursoStudent {
   _id: string;
@@ -43,9 +44,10 @@ export default function CursosTab() {
       const params = new URLSearchParams({
         curso: curso.nombre,
         anio: String(curso.anio),
+        limit: "200",
       });
-      const res = await fetch(`/api/students?${params.toString()}`);
-      if (res.ok) setDetalleStudents(await res.json());
+      const page = await fetchStudentsPage<CursoStudent>(params);
+      setDetalleStudents(page.items);
     } finally {
       setDetalleLoading(false);
     }

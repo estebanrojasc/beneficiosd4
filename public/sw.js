@@ -1,38 +1,23 @@
 // Service worker del kiosko. Estrategia:
 // - Páginas (HTML): RED primero (así tras un deploy siempre se baja el HTML
 //   nuevo con los hashes de CSS/JS correctos). La caché solo es respaldo offline.
-// - Modelos de IA y wasm de ORT: caché primero (cambian poco y son pesados);
-//   van en una caché separada para NO re-descargarlos en cada deploy.
+// - Modelos de IA y wasm de ORT: caché primero al usarlos (cambian poco y son
+//   pesados); van en una caché separada para NO re-descargarlos en cada deploy.
 // - Resto de estáticos públicos: caché primero.
 //
 // Sube APP_CACHE cuando cambie la app; sube MODEL_CACHE solo si cambian modelos.
-const APP_CACHE = "almuerzo-app-v4";
+const APP_CACHE = "almuerzo-app-v6";
 const MODEL_CACHE = "almuerzo-models-v1";
 const KEEP = [APP_CACHE, MODEL_CACHE];
 
 const PRECACHE_APP = ["/", "/validar", "/enrolar", "/manifest.webmanifest"];
-const PRECACHE_MODELS = [
-  "/models/arcface/det_500m.onnx",
-  "/models/arcface/w600k_mbf.onnx",
-  "/ort/ort-wasm-simd-threaded.asyncify.mjs",
-  "/ort/ort-wasm-simd-threaded.asyncify.wasm",
-  "/ort/ort-wasm-simd-threaded.jsep.mjs",
-  "/ort/ort-wasm-simd-threaded.jsep.wasm",
-  "/ort/ort-wasm-simd-threaded.jspi.mjs",
-  "/ort/ort-wasm-simd-threaded.jspi.wasm",
-  "/ort/ort-wasm-simd-threaded.mjs",
-  "/ort/ort-wasm-simd-threaded.wasm",
-];
-
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    Promise.all([
-      caches.open(APP_CACHE).then((c) => c.addAll(PRECACHE_APP)).catch(() => {}),
-      caches
-        .open(MODEL_CACHE)
-        .then((c) => c.addAll(PRECACHE_MODELS))
-        .catch(() => {}),
-    ]).then(() => self.skipWaiting())
+    caches
+      .open(APP_CACHE)
+      .then((c) => c.addAll(PRECACHE_APP))
+      .catch(() => {})
+      .then(() => self.skipWaiting())
   );
 });
 

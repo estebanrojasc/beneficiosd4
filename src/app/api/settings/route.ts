@@ -3,11 +3,21 @@ import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { getSettings, saveSettings, type AppSettings } from "@/lib/settings";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const db = await getDb();
   const settings = await getSettings(db);
   const session = await getSession();
   const hasLogo = Boolean(settings.logo);
+  const light = req.nextUrl.searchParams.get("light") === "1";
+  if (light) {
+    return NextResponse.json({
+      enrolamientoAbierto: settings.enrolamientoAbierto,
+      umbralAsistencia: settings.umbralAsistencia,
+      umbralCaraDuplicada: settings.umbralCaraDuplicada,
+      establecimientoNombre: settings.establecimientoNombre,
+      hasLogo,
+    });
+  }
   // Sin sesión solo exponemos lo público: nombre y si hay logo (NO el base64,
   // que es pesado). El logo se sirve aparte como imagen en /api/branding/logo.
   if (!session) {

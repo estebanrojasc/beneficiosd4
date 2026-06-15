@@ -2,17 +2,32 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import QRCode from "qrcode";
+import dynamic from "next/dynamic";
 import type { Program, ProgramModalidad } from "@/lib/types";
 import { isValidRut, formatRut, normalizeRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
 import CursoSelect from "@/components/CursoSelect";
 import RutInput from "@/components/RutInput";
-import FaceCapture from "@/components/FaceCapture";
-import BulkAIImport from "@/components/mantenedor/BulkAIImport";
-import StudentModal, { type StudentLite } from "@/components/mantenedor/StudentModal";
+import type { StudentLite } from "@/components/mantenedor/StudentModal";
+import { fetchStudentsPage } from "@/lib/studentsClient";
 
 const ICON_CHOICES = ["🍽️", "📦", "🪪", "🎒", "📚", "🎫", "💊", "🧥", "🗂️"];
+
+const ModalLoading = () => (
+  <div className="text-center font-bold text-[#6b7aa0] py-8">Cargando...</div>
+);
+const FaceCapture = dynamic(() => import("@/components/FaceCapture"), {
+  loading: () => <ModalLoading />,
+  ssr: false,
+});
+const BulkAIImport = dynamic(
+  () => import("@/components/mantenedor/BulkAIImport"),
+  { loading: () => <ModalLoading />, ssr: false }
+);
+const StudentModal = dynamic(
+  () => import("@/components/mantenedor/StudentModal"),
+  { loading: () => <ModalLoading />, ssr: false }
+);
 
 // Clave cercana sugerida a partir del nombre y el año (ej. "almuerzo2026").
 function claveSugerida(nombre: string): string {
@@ -426,13 +441,15 @@ function ProgramDetail({
   const sections: { id: DetailSection; label: string; emoji: string }[] =
     mode === "operacion"
       ? [
-          { id: "reporte", label: "Reporte", emoji: "📊" },
           { id: "miembros", label: "Lista", emoji: "📋" },
+          { id: "reporte", label: "Reporte", emoji: "📊" },
           { id: "qr", label: "QR", emoji: "🔳" },
         ]
       : [{ id: "ajustes", label: "Ajustes", emoji: "⚙️" }];
 
-  const [section, setSection] = useState<DetailSection>(sections[0].id);
+  const [section, setSection] = useState<DetailSection>(
+    mode === "operacion" ? "miembros" : sections[0].id
+  );
   const [busy, setBusy] = useState(false);
   const activo = program.estado === "activo";
 
@@ -536,6 +553,8 @@ function ProgramDetail({
 
 // --- Miembros ----------------------------------------------------------------
 
+const MEMBER_PAGE = 50;
+
 interface MemberView {
   rut: string;
   nombre: string;
@@ -565,6 +584,7 @@ function MembersSection({
   const [editInitial, setEditInitial] = useState<Partial<StudentLite> | null>(
     null
   );
+  const [visibleLimit, setVisibleLimit] = useState(MEMBER_PAGE);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -636,16 +656,13 @@ function MembersSection({
   async function editMember(m: MemberView) {
     let st: Partial<StudentLite> | null = null;
     try {
-      const res = await fetch(
-        `/api/students?q=${encodeURIComponent(m.rut)}`,
-        { cache: "no-store" }
+      const params = new URLSearchParams({ q: m.rut, limit: "5" });
+      const page = await fetchStudentsPage<StudentLite & { rut?: string }>(
+        params
       );
-      const arr = res.ok ? await res.json() : [];
-      const found = Array.isArray(arr)
-        ? arr.find(
-            (x: { rut?: string }) => normalizeRut(x.rut || "") === m.rut
-          )
-        : null;
+      const found = page.items.find(
+        (x) => normalizeRut(x.rut || "") === m.rut
+      );
       if (found)
         st = {
           _id: found._id,
@@ -694,10 +711,16 @@ function MembersSection({
     });
   }, [members, filtroCurso, q]);
 
+  const pagedVisibles = useMemo(
+    () => visibles.slice(0, visibleLimit),
+    [visibles, visibleLimit]
+  );
+  const hasMoreMembers = visibles.length > visibleLimit;
+
   // Agrupamos por curso; "Sin curso" (falta info) va al final.
   const grupos = useMemo(() => {
     const map = new Map<string, MemberView[]>();
-    for (const m of visibles) {
+    for (const m of pagedVisibles) {
       const key = m.curso || "Sin curso";
       const arr = map.get(key) || [];
       arr.push(m);
@@ -708,7 +731,7 @@ function MembersSection({
       if (b[0] === "Sin curso") return -1;
       return a[0].localeCompare(b[0], "es", { numeric: true });
     });
-  }, [visibles]);
+  }, [pagedVisibles]);
 
   if (program.requiereMembresia === false) {
     return (
@@ -794,13 +817,19 @@ function MembersSection({
         <input
           className="input-game !py-2 flex-1 min-w-[160px]"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setVisibleLimit(MEMBER_PAGE);
+          }}
           placeholder="🔍 Buscar por nombre o RUT"
         />
         <select
           className="input-game !w-auto !py-2"
           value={filtroCurso}
-          onChange={(e) => setFiltroCurso(e.target.value)}
+          onChange={(e) => {
+            setFiltroCurso(e.target.value);
+            setVisibleLimit(MEMBER_PAGE);
+          }}
         >
           <option value="">Todos los cursos ({members.length})</option>
           {cursos.map((c) => (
@@ -812,8 +841,8 @@ function MembersSection({
       </div>
 
       <div className="text-xs font-bold text-[#9aa6bf]">
-        {visibles.length} de {members.length} · sin cara:{" "}
-        {members.filter((m) => !m.enrolled).length}
+        Mostrando {pagedVisibles.length} de {visibles.length} · total lista:{" "}
+        {members.length} · sin cara: {members.filter((m) => !m.enrolled).length}
       </div>
 
       {loading ? (
@@ -881,6 +910,17 @@ function MembersSection({
               ))}
             </div>
           ))}
+        </div>
+      )}
+
+      {hasMoreMembers && !loading && (
+        <div className="flex justify-center">
+          <button
+            onClick={() => setVisibleLimit((v) => v + MEMBER_PAGE)}
+            className="btn-game btn-gray !px-6"
+          >
+            Ver más ({visibles.length - visibleLimit} restantes)
+          </button>
         </div>
       )}
 
@@ -1093,14 +1133,18 @@ function QRSection({
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      fetch("/api/settings")
+      fetch("/api/branding")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d)
+          if (d) {
+            const logo = d.hasLogo
+              ? `/api/branding/logo?v=${encodeURIComponent(d.logoVersion || "1")}`
+              : "";
             setBranding({
-              nombre: d.establecimientoNombre || "",
-              logo: d.logo || "",
+              nombre: d.name || "",
+              logo,
             });
+          }
         })
         .catch(() => {});
     }, 0);
@@ -1109,13 +1153,24 @@ function QRSection({
 
   useEffect(() => {
     if (!url) return;
-    QRCode.toDataURL(url, {
-      width: 520,
-      margin: 2,
-      color: { dark: "#27407a", light: "#ffffff" },
-    })
-      .then(setDataUrl)
-      .catch(() => setDataUrl(""));
+    let active = true;
+    import("qrcode")
+      .then((QRCode) =>
+        QRCode.toDataURL(url, {
+          width: 520,
+          margin: 2,
+          color: { dark: "#27407a", light: "#ffffff" },
+        })
+      )
+      .then((next) => {
+        if (active) setDataUrl(next);
+      })
+      .catch(() => {
+        if (active) setDataUrl("");
+      });
+    return () => {
+      active = false;
+    };
   }, [url]);
 
   async function patch(body: Record<string, unknown>) {
@@ -1286,14 +1341,18 @@ function ReportSection({ program }: { program: Program }) {
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      fetch("/api/settings")
+      fetch("/api/branding")
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (d)
+          if (d) {
+            const logo = d.hasLogo
+              ? `/api/branding/logo?v=${encodeURIComponent(d.logoVersion || "1")}`
+              : "";
             setBranding({
-              nombre: d.establecimientoNombre || "",
-              logo: d.logo || "",
+              nombre: d.name || "",
+              logo,
             });
+          }
         })
         .catch(() => {});
     }, 0);

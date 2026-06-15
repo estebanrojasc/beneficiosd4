@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import QRCode from "qrcode";
 
 export default function QRTab() {
   const [baseUrl, setBaseUrl] = useState("");
@@ -19,7 +18,7 @@ export default function QRTab() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/settings")
+    fetch("/api/settings?light=1")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
         if (data) setOpenEnroll(Boolean(data.enrolamientoAbierto));
@@ -46,13 +45,24 @@ export default function QRTab() {
 
   useEffect(() => {
     if (!baseUrl) return;
-    QRCode.toDataURL(baseUrl, {
-      width: 520,
-      margin: 2,
-      color: { dark: "#27407a", light: "#ffffff" },
-    })
-      .then(setDataUrl)
-      .catch(() => setDataUrl(""));
+    let active = true;
+    import("qrcode")
+      .then((QRCode) =>
+        QRCode.toDataURL(baseUrl, {
+          width: 520,
+          margin: 2,
+          color: { dark: "#27407a", light: "#ffffff" },
+        })
+      )
+      .then((next) => {
+        if (active) setDataUrl(next);
+      })
+      .catch(() => {
+        if (active) setDataUrl("");
+      });
+    return () => {
+      active = false;
+    };
   }, [baseUrl]);
 
   function download() {

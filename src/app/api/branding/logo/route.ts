@@ -16,7 +16,13 @@ function fallbackSvg(nombre: string): string {
 </svg>`;
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Cuando la URL trae ?v=<version> (la del branding), podemos cachear de forma
+  // inmutable: si cambia el logo, cambia la versión y por ende la URL.
+  const versioned = new URL(req.url).searchParams.has("v");
+  const imgCache = versioned
+    ? "public, max-age=31536000, immutable"
+    : "public, max-age=300, must-revalidate";
   try {
     const db = await getDb();
     const { logo, establecimientoNombre } = await getSettings(db);
@@ -26,8 +32,7 @@ export async function GET() {
       return new Response(new Uint8Array(buf), {
         headers: {
           "Content-Type": m[1],
-          // Refresca razonablemente rápido al cambiar el logo.
-          "Cache-Control": "public, max-age=300, must-revalidate",
+          "Cache-Control": imgCache,
         },
       });
     }

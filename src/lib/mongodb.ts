@@ -76,6 +76,8 @@ async function ensureIndexes(db: Db): Promise<void> {
         await db
           .collection("students")
           .createIndex({ rut: 1 }, { unique: true });
+        await db.collection("students").createIndex({ nombre: 1 });
+        await db.collection("students").createIndex({ curso: 1, nombre: 1 });
         await db
           .collection("allowedRuts")
           .createIndex({ rut: 1 }, { unique: true });
@@ -96,6 +98,7 @@ async function ensureIndexes(db: Db): Promise<void> {
         await db
           .collection("programs")
           .createIndex({ slug: 1 }, { sparse: true });
+        await db.collection("programs").createIndex({ estado: 1, nombre: 1 });
       } catch (err) {
         console.warn(
           "[mongodb] No se pudieron crear todos los índices únicos. " +

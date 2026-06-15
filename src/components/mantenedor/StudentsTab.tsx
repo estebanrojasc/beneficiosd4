@@ -1,56 +1,85 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import StudentModal, { type StudentLite } from "./StudentModal";
+import dynamic from "next/dynamic";
+import type { StudentLite } from "./StudentModal";
 import CursoSelect from "@/components/CursoSelect";
-import BulkAIImport from "./BulkAIImport";
 import { formatRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
+import { fetchStudentsPage } from "@/lib/studentsClient";
 
 interface StudentRow extends StudentLite {
   enrolled: boolean;
 }
 
 const PAGE_SIZE = 60;
+const MIN_SEARCH = 2;
+
+const ModalLoading = () => (
+  <div className="text-center font-bold text-[#6b7aa0] py-8">Cargando...</div>
+);
+const StudentModal = dynamic(() => import("./StudentModal"), {
+  loading: () => <ModalLoading />,
+  ssr: false,
+});
+const BulkAIImport = dynamic(() => import("./BulkAIImport"), {
+  loading: () => <ModalLoading />,
+  ssr: false,
+});
 
 export default function StudentsTab() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [q, setQ] = useState("");
   const [cursoFilter, setCursoFilter] = useState("");
   const [loading, setLoading] = useState(false);
-  const [visible, setVisible] = useState(PAGE_SIZE);
+  const [total, setTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
   const [modal, setModal] = useState<{
     open: boolean;
     initial?: Partial<StudentLite>;
   }>({ open: false });
   const [bulkAI, setBulkAI] = useState(false);
 
-  const load = useCallback(async (query: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/students?q=${encodeURIComponent(query)}`);
-      if (res.ok) setStudents(await res.json());
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const canLoad =
+    q.trim().length >= MIN_SEARCH || Boolean(cursoFilter.trim());
+
+  const load = useCallback(
+    async (query: string, curso: string, skip = 0, append = false) => {
+      const searchable = query.trim().length >= MIN_SEARCH || Boolean(curso);
+      if (!searchable) {
+        setStudents([]);
+        setTotal(0);
+        setHasMore(false);
+        return;
+      }
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          limit: String(PAGE_SIZE),
+          skip: String(skip),
+        });
+        if (query.trim()) params.set("q", query.trim());
+        if (curso) params.set("curso", curso);
+        const page = await fetchStudentsPage<StudentRow>(params);
+        setStudents((prev) => (append ? [...prev, ...page.items] : page.items));
+        setTotal(page.total);
+        setHasMore(page.hasMore);
+      } finally {
+        setLoading(false);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
-    const t = setTimeout(() => load(q), 250);
+    const t = setTimeout(() => load(q, cursoFilter, 0, false), 250);
     return () => clearTimeout(t);
-  }, [q, load]);
-
-  const filtered = cursoFilter
-    ? students.filter((s) => s.curso === cursoFilter)
-    : students;
-
-  const shown = filtered.slice(0, visible);
-  const hasMore = filtered.length > visible;
+  }, [q, cursoFilter, load]);
 
   async function remove(id: string, nombre: string) {
     if (!confirm(`¿Eliminar a ${nombre}?`)) return;
     await fetch(`/api/students/${id}`, { method: "DELETE" });
-    load(q);
+    load(q, cursoFilter, 0, false);
   }
 
   return (
@@ -60,18 +89,12 @@ export default function StudentsTab() {
           className="input-game flex-1"
           placeholder="🔍 Buscar por nombre, apellido, RUT o curso..."
           value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setVisible(PAGE_SIZE);
-          }}
+          onChange={(e) => setQ(e.target.value)}
         />
         <div className="w-full sm:w-56">
           <CursoSelect
             value={cursoFilter}
-            onChange={(v) => {
-              setCursoFilter(v);
-              setVisible(PAGE_SIZE);
-            }}
+            onChange={setCursoFilter}
             className="input-game"
             emptyLabel="Todos los cursos"
           />
@@ -91,26 +114,33 @@ export default function StudentsTab() {
         </button>
       </div>
 
+      {!canLoad && !loading && (
+        <div className="card p-8 text-center text-[#6b7aa0] font-semibold">
+          Escribe al menos {MIN_SEARCH} caracteres para buscar, o elige un curso
+          para ver estudiantes sin cargar toda la base de una vez.
+        </div>
+      )}
+
       {loading && (
         <div className="text-center text-[#6b7aa0] font-bold py-4">
           Cargando...
         </div>
       )}
 
-      {!loading && filtered.length === 0 && (
+      {canLoad && !loading && students.length === 0 && (
         <div className="card p-8 text-center text-[#6b7aa0] font-semibold">
-          No hay estudiantes todavía. ¡Agrega el primero! 🎉
+          No hay estudiantes con ese criterio.
         </div>
       )}
 
-      {!loading && filtered.length > 0 && (
+      {canLoad && !loading && students.length > 0 && (
         <div className="text-sm font-bold text-[#6b7aa0] mb-3">
-          Mostrando {shown.length} de {filtered.length}
+          Mostrando {students.length} de {total}
         </div>
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {shown.map((s) => (
+        {students.map((s) => (
           <div
             key={s._id}
             className="card p-4 flex items-center justify-between gap-3"
@@ -153,13 +183,13 @@ export default function StudentsTab() {
         ))}
       </div>
 
-      {hasMore && (
+      {hasMore && !loading && (
         <div className="flex justify-center mt-5">
           <button
-            onClick={() => setVisible((v) => v + PAGE_SIZE)}
+            onClick={() => load(q, cursoFilter, students.length, true)}
             className="btn-game btn-gray !px-6"
           >
-            Ver más ({filtered.length - visible} restantes)
+            Ver más ({total - students.length} restantes)
           </button>
         </div>
       )}
@@ -170,7 +200,7 @@ export default function StudentsTab() {
           onClose={() => setModal({ open: false })}
           onSaved={() => {
             setModal({ open: false });
-            load(q);
+            load(q, cursoFilter, 0, false);
           }}
         />
       )}
@@ -181,7 +211,7 @@ export default function StudentsTab() {
           onClose={() => setBulkAI(false)}
           onDone={() => {
             setBulkAI(false);
-            load(q);
+            load(q, cursoFilter, 0, false);
           }}
         />
       )}

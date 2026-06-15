@@ -7,7 +7,7 @@ import { useBranding, BrandLogo } from "@/components/Brand";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { name, hasLogo } = useBranding();
+  const { name, hasLogo, logoVersion } = useBranding();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -44,7 +44,12 @@ export default function LoginPage() {
       >
         <div className="text-center mb-6">
           <div className="mb-2 flex justify-center">
-            <BrandLogo hasLogo={hasLogo} fallback="🔑" size={hasLogo ? 80 : 64} />
+            <BrandLogo
+              hasLogo={hasLogo}
+              fallback="🔑"
+              size={hasLogo ? 80 : 64}
+              version={logoVersion}
+            />
           </div>
           {name && (
             <div className="font-black text-[#27407a] text-lg">{name}</div>
