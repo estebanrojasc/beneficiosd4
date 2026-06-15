@@ -7,6 +7,7 @@ import type { Program, ProgramModalidad } from "@/lib/types";
 import { isValidRut, formatRut, normalizeRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
 import CursoSelect from "@/components/CursoSelect";
+import CourseAccordion from "@/components/CourseAccordion";
 import RutInput from "@/components/RutInput";
 import type { StudentLite } from "@/components/mantenedor/StudentModal";
 import { fetchStudentsPage } from "@/lib/studentsClient";
@@ -553,7 +554,20 @@ function ProgramDetail({
 
 // --- Miembros ----------------------------------------------------------------
 
-const MEMBER_PAGE = 50;
+function groupByCurso<T extends { curso: string }>(items: T[]): [string, T[]][] {
+  const map = new Map<string, T[]>();
+  for (const item of items) {
+    const key = item.curso || "Sin curso";
+    const arr = map.get(key) || [];
+    arr.push(item);
+    map.set(key, arr);
+  }
+  return Array.from(map.entries()).sort((a, b) => {
+    if (a[0] === "Sin curso") return 1;
+    if (b[0] === "Sin curso") return -1;
+    return a[0].localeCompare(b[0], "es", { numeric: true });
+  });
+}
 
 interface MemberView {
   rut: string;
@@ -584,7 +598,7 @@ function MembersSection({
   const [editInitial, setEditInitial] = useState<Partial<StudentLite> | null>(
     null
   );
-  const [visibleLimit, setVisibleLimit] = useState(MEMBER_PAGE);
+  const [expandedCourses, setExpandedCourses] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -602,6 +616,21 @@ function MembersSection({
     const t = window.setTimeout(() => void load(), 0);
     return () => window.clearTimeout(t);
   }, [load]);
+
+  useEffect(() => {
+    if (filtroCurso) {
+      setExpandedCourses(new Set([filtroCurso]));
+    }
+  }, [filtroCurso]);
+
+  function toggleCourse(curso: string) {
+    setExpandedCourses((prev) => {
+      const next = new Set(prev);
+      if (next.has(curso)) next.delete(curso);
+      else next.add(curso);
+      return next;
+    });
+  }
 
   async function add() {
     if (!isValidRut(rut)) {
@@ -693,14 +722,6 @@ function MembersSection({
     load();
   }
 
-  const cursos = useMemo(
-    () =>
-      Array.from(new Set(members.map((m) => m.curso || "Sin curso"))).sort((a, b) =>
-        a.localeCompare(b, "es", { numeric: true })
-      ),
-    [members]
-  );
-
   const visibles = useMemo(() => {
     const term = q.trim().toLowerCase();
     return members.filter((m) => {
@@ -711,27 +732,7 @@ function MembersSection({
     });
   }, [members, filtroCurso, q]);
 
-  const pagedVisibles = useMemo(
-    () => visibles.slice(0, visibleLimit),
-    [visibles, visibleLimit]
-  );
-  const hasMoreMembers = visibles.length > visibleLimit;
-
-  // Agrupamos por curso; "Sin curso" (falta info) va al final.
-  const grupos = useMemo(() => {
-    const map = new Map<string, MemberView[]>();
-    for (const m of pagedVisibles) {
-      const key = m.curso || "Sin curso";
-      const arr = map.get(key) || [];
-      arr.push(m);
-      map.set(key, arr);
-    }
-    return Array.from(map.entries()).sort((a, b) => {
-      if (a[0] === "Sin curso") return 1;
-      if (b[0] === "Sin curso") return -1;
-      return a[0].localeCompare(b[0], "es", { numeric: true });
-    });
-  }, [pagedVisibles]);
+  const grupos = useMemo(() => groupByCurso(visibles), [visibles]);
 
   if (program.requiereMembresia === false) {
     return (
@@ -813,36 +814,27 @@ function MembersSection({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <input
-          className="input-game !py-2 flex-1 min-w-[160px]"
+          className="input-game flex-1"
           value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setVisibleLimit(MEMBER_PAGE);
-          }}
+          onChange={(e) => setQ(e.target.value)}
           placeholder="🔍 Buscar por nombre o RUT"
         />
-        <select
-          className="input-game !w-auto !py-2"
-          value={filtroCurso}
-          onChange={(e) => {
-            setFiltroCurso(e.target.value);
-            setVisibleLimit(MEMBER_PAGE);
-          }}
-        >
-          <option value="">Todos los cursos ({members.length})</option>
-          {cursos.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+        <div className="w-full sm:w-56">
+          <CursoSelect
+            value={filtroCurso}
+            onChange={setFiltroCurso}
+            className="input-game"
+            emptyLabel="Todos los cursos"
+          />
+        </div>
       </div>
 
       <div className="text-xs font-bold text-[#9aa6bf]">
-        Mostrando {pagedVisibles.length} de {visibles.length} · total lista:{" "}
-        {members.length} · sin cara: {members.filter((m) => !m.enrolled).length}
+        {visibles.length} estudiantes en {grupos.length} curso
+        {grupos.length !== 1 ? "s" : ""} · total lista: {members.length} · sin
+        cara: {members.filter((m) => !m.enrolled).length}
       </div>
 
       {loading ? (
@@ -850,77 +842,80 @@ function MembersSection({
       ) : visibles.length === 0 ? (
         <div className="text-[#6b7aa0] font-bold py-6">Sin resultados.</div>
       ) : (
-        <div className="space-y-4">
-          {grupos.map(([curso, items]) => (
-            <div key={curso} className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <h4 className="font-black text-[#27407a]">{curso}</h4>
-                <span className="text-xs font-bold text-[#9aa6bf]">
-                  ({items.length})
-                </span>
-                {curso === "Sin curso" && (
-                  <span className="text-xs font-bold text-[#c0392b]">
-                    falta info de curso
-                  </span>
-                )}
-              </div>
-              {items.map((m) => (
-                <div key={m.rut} className="card p-3 flex items-center gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="font-black text-[#27407a] truncate">
-                      {fullName(m.nombre, m.apellidos) || "Sin nombre"}
+        <div className="space-y-3">
+          {grupos.map(([curso, items]) => {
+            const sinCara = items.filter((m) => !m.enrolled).length;
+            return (
+              <CourseAccordion
+                key={curso}
+                curso={curso}
+                expanded={expandedCourses.has(curso)}
+                onToggle={() => toggleCourse(curso)}
+                metrics={
+                  <>
+                    <span className="text-xs font-bold text-[#9aa6bf]">
+                      {items.length} estudiantes
+                    </span>
+                    {sinCara > 0 && (
+                      <span className="text-xs font-bold text-[#c0392b]">
+                        {sinCara} sin cara
+                      </span>
+                    )}
+                    {curso === "Sin curso" && (
+                      <span className="text-xs font-bold text-[#c0392b]">
+                        falta info de curso
+                      </span>
+                    )}
+                  </>
+                }
+              >
+                {items.map((m) => (
+                  <div key={m.rut} className="card p-3 flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-black text-[#27407a] truncate">
+                        {fullName(m.nombre, m.apellidos) || "Sin nombre"}
+                      </div>
+                      <div className="text-xs text-[#9aa6bf] font-semibold">
+                        {formatRut(m.rut)}
+                      </div>
                     </div>
-                    <div className="text-xs text-[#9aa6bf] font-semibold">
-                      {formatRut(m.rut)}
-                    </div>
+                    <span
+                      className={`text-xs font-black px-2 py-1 rounded-lg ${
+                        m.enrolled
+                          ? "bg-[#eafaf0] text-[#1c7a44]"
+                          : "bg-[#fdeaea] text-[#c0392b]"
+                      }`}
+                    >
+                      {m.enrolled ? "Cara ✓" : "Sin cara"}
+                    </span>
+                    <button
+                      onClick={() => editMember(m)}
+                      className="btn-game btn-orange !py-1.5 !px-3 !text-sm"
+                      title="Editar datos del estudiante"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => setEnrollRow(m)}
+                      className={`btn-game !py-1.5 !px-3 !text-sm ${
+                        m.enrolled ? "btn-gray" : "btn-purple"
+                      }`}
+                      title={m.enrolled ? "Volver a enrolar la cara" : "Enrolar cara"}
+                    >
+                      {m.enrolled ? "↻" : "📸"}
+                    </button>
+                    <button
+                      onClick={() => remove(m.rut)}
+                      className="btn-game btn-red !py-1.5 !px-3 !text-sm"
+                      title="Quitar de la lista"
+                    >
+                      🗑️
+                    </button>
                   </div>
-                  <span
-                    className={`text-xs font-black px-2 py-1 rounded-lg ${
-                      m.enrolled
-                        ? "bg-[#eafaf0] text-[#1c7a44]"
-                        : "bg-[#fdeaea] text-[#c0392b]"
-                    }`}
-                  >
-                    {m.enrolled ? "Cara ✓" : "Sin cara"}
-                  </span>
-                  <button
-                    onClick={() => editMember(m)}
-                    className="btn-game btn-orange !py-1.5 !px-3 !text-sm"
-                    title="Editar datos del estudiante"
-                  >
-                    ✏️
-                  </button>
-                  <button
-                    onClick={() => setEnrollRow(m)}
-                    className={`btn-game !py-1.5 !px-3 !text-sm ${
-                      m.enrolled ? "btn-gray" : "btn-purple"
-                    }`}
-                    title={m.enrolled ? "Volver a enrolar la cara" : "Enrolar cara"}
-                  >
-                    {m.enrolled ? "↻" : "📸"}
-                  </button>
-                  <button
-                    onClick={() => remove(m.rut)}
-                    className="btn-game btn-red !py-1.5 !px-3 !text-sm"
-                    title="Quitar de la lista"
-                  >
-                    🗑️
-                  </button>
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {hasMoreMembers && !loading && (
-        <div className="flex justify-center">
-          <button
-            onClick={() => setVisibleLimit((v) => v + MEMBER_PAGE)}
-            className="btn-game btn-gray !px-6"
-          >
-            Ver más ({visibles.length - visibleLimit} restantes)
-          </button>
+                ))}
+              </CourseAccordion>
+            );
+          })}
         </div>
       )}
 
@@ -1312,12 +1307,23 @@ interface TemporalStudent {
   count: number;
   percentage: number;
 }
+interface TemporalCourseSummary {
+  curso: string;
+  total: number;
+  promedio: number;
+  bajoUmbral: number;
+}
 interface PuntualStudent {
   rut: string;
   nombre: string;
   curso: string;
   delivered: boolean;
   fecha?: string;
+}
+interface PuntualCourseSummary {
+  curso: string;
+  total: number;
+  entregados: number;
 }
 
 function monthNow(): string {
@@ -1337,7 +1343,24 @@ function ReportSection({ program }: { program: Program }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null);
   const [soloBajos, setSoloBajos] = useState(false);
+  const [filtroCurso, setFiltroCurso] = useState("");
+  const [expandedCourses, setExpandedCourses] = useState<Set<string>>(new Set());
   const [branding, setBranding] = useState<Branding>({ nombre: "", logo: "" });
+
+  useEffect(() => {
+    if (filtroCurso) {
+      setExpandedCourses(new Set([filtroCurso]));
+    }
+  }, [filtroCurso]);
+
+  function toggleCourse(curso: string) {
+    setExpandedCourses((prev) => {
+      const next = new Set(prev);
+      if (next.has(curso)) next.delete(curso);
+      else next.add(curso);
+      return next;
+    });
+  }
 
   useEffect(() => {
     const t = window.setTimeout(() => {
@@ -1388,32 +1411,81 @@ function ReportSection({ program }: { program: Program }) {
 
   const days: string[] = data.days || [];
   const umbral: number = data.umbral || 70;
+  const courseSummary: TemporalCourseSummary[] = data.courseSummary || [];
   let students: TemporalStudent[] = data.students || [];
   if (soloBajos) students = students.filter((s) => s.percentage < umbral);
+  if (filtroCurso) {
+    students = students.filter((s) => (s.curso || "Sin curso") === filtroCurso);
+  }
+  const visibleSummary = filtroCurso
+    ? courseSummary.filter((c) => c.curso === filtroCurso)
+    : courseSummary;
+  const grupos = groupByCurso(students);
 
   function exportPdf() {
-    const rows = (data.students as TemporalStudent[])
+    let exportStudents: TemporalStudent[] = data.students || [];
+    if (soloBajos) {
+      exportStudents = exportStudents.filter((s) => s.percentage < umbral);
+    }
+    if (filtroCurso) {
+      exportStudents = exportStudents.filter(
+        (s) => (s.curso || "Sin curso") === filtroCurso
+      );
+    }
+    const exportSummary = filtroCurso
+      ? courseSummary.filter((c) => c.curso === filtroCurso)
+      : courseSummary;
+
+    const summaryRows = exportSummary
       .map(
-        (s) => `<tr>
-          <td>${escapeHtml(s.curso || "—")}</td>
-          <td>${escapeHtml(s.nombre)}</td>
-          ${days.map((d) => `<td style="text-align:center">${s.attended.includes(d) ? "✓" : "·"}</td>`).join("")}
-          <td style="text-align:center"><b>${s.count}</b></td>
-          <td style="text-align:center;color:${s.percentage < umbral ? "#c0392b" : "#1c7a44"}"><b>${s.percentage}%</b></td>
+        (c) => `<tr>
+          <td>${escapeHtml(c.curso)}</td>
+          <td style="text-align:center">${c.total}</td>
+          <td style="text-align:center;color:${c.promedio < umbral ? "#c0392b" : "#1c7a44"}"><b>${c.promedio}%</b></td>
+          <td style="text-align:center">${c.bajoUmbral}</td>
         </tr>`
       )
       .join("");
+
+    const courseSections = groupByCurso(exportStudents)
+      .map(([curso, list], idx) => {
+        const promedio =
+          list.length > 0
+            ? Math.round(
+                list.reduce((sum, s) => sum + s.percentage, 0) / list.length
+              )
+            : 0;
+        const rows = list
+          .map(
+            (s) => `<tr>
+              <td>${escapeHtml(s.nombre)}</td>
+              ${days.map((d) => `<td style="text-align:center">${s.attended.includes(d) ? "✓" : "·"}</td>`).join("")}
+              <td style="text-align:center"><b>${s.count}</b></td>
+              <td style="text-align:center;color:${s.percentage < umbral ? "#c0392b" : "#1c7a44"}"><b>${s.percentage}%</b></td>
+            </tr>`
+          )
+          .join("");
+        return `<div style="page-break-before:${idx > 0 ? "always" : "auto"};margin-top:16px">
+          <h2 style="color:#27407a;font-size:14px">${escapeHtml(curso)} — ${list.length} estudiantes · Promedio ${promedio}%</h2>
+          <table><thead><tr><th>Nombre</th>
+          ${days.map((d) => `<th>${d.slice(8)}</th>`).join("")}
+          <th>Total</th><th>%</th></tr></thead><tbody>${rows}</tbody></table>
+        </div>`;
+      })
+      .join("");
+
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<html><head><title>Reporte ${escapeHtml(program.nombre)} ${month}</title>
       <style>@page{size:A4 landscape;margin:12mm}body{font-family:sans-serif;color:#222}
-      h1{color:#27407a}table{border-collapse:collapse;width:100%;font-size:11px}
+      h1{color:#27407a}h2{color:#27407a}table{border-collapse:collapse;width:100%;font-size:10px;margin-bottom:12px}
       th,td{border:1px solid #ccc;padding:3px 5px}th{background:#eef2ff}</style></head>
       <body>${brandingHeaderHtml(branding)}<h1>${program.icono} ${escapeHtml(program.nombre)} — ${month}</h1>
       <p>Días con servicio: ${days.length} · Umbral baja asistencia: ${umbral}%</p>
-      <table><thead><tr><th>Curso</th><th>Nombre</th>
-      ${days.map((d) => `<th>${d.slice(8)}</th>`).join("")}
-      <th>Total</th><th>%</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
+      <h2>Resumen por curso</h2>
+      <table><thead><tr><th>Curso</th><th>Estudiantes</th><th>Promedio</th><th>Bajo umbral</th></tr></thead>
+      <tbody>${summaryRows}</tbody></table>
+      ${courseSections}</body></html>`);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 400);
@@ -1421,13 +1493,21 @@ function ReportSection({ program }: { program: Program }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
         <input
           type="month"
           className="input-game !w-auto !py-2"
           value={month}
           onChange={(e) => setMonth(e.target.value)}
         />
+        <div className="w-full sm:w-56">
+          <CursoSelect
+            value={filtroCurso}
+            onChange={setFiltroCurso}
+            className="input-game"
+            emptyLabel="Todos los cursos"
+          />
+        </div>
         <label className="flex items-center gap-2 font-bold text-[#41507a] text-sm">
           <input
             type="checkbox"
@@ -1437,52 +1517,122 @@ function ReportSection({ program }: { program: Program }) {
           />
           Solo baja asistencia
         </label>
-        <button onClick={exportPdf} className="btn-game btn-purple !py-2 !px-4 ml-auto">
+        <button onClick={exportPdf} className="btn-game btn-purple !py-2 !px-4 sm:ml-auto">
           🖨️ PDF
         </button>
       </div>
 
       <div className="text-sm font-semibold text-[#6b7aa0]">
-        {days.length} días con servicio · {students.length} estudiantes
+        {days.length} días con servicio · {students.length} estudiantes ·{" "}
+        {grupos.length} curso{grupos.length !== 1 ? "s" : ""}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="text-sm border-collapse w-full">
-          <thead>
-            <tr className="bg-[#eef2ff]">
-              <th className="p-2 text-left sticky left-0 bg-[#eef2ff]">Estudiante</th>
-              {days.map((d) => (
-                <th key={d} className="p-1 font-bold">
-                  {d.slice(8)}
-                </th>
-              ))}
-              <th className="p-2">%</th>
-            </tr>
-          </thead>
-          <tbody>
-            {students.map((s) => (
-              <tr key={s.rut} className="border-b border-[#eef2ff]">
-                <td className="p-2 sticky left-0 bg-white">
-                  <div className="font-bold text-[#27407a]">{s.nombre}</div>
-                  <div className="text-xs text-[#9aa6bf]">{s.curso}</div>
-                </td>
-                {days.map((d) => (
-                  <td key={d} className="text-center">
-                    {s.attended.includes(d) ? "✓" : "·"}
-                  </td>
-                ))}
-                <td
-                  className={`text-center font-black ${
-                    s.percentage < umbral ? "text-[#c0392b]" : "text-[#1c7a44]"
-                  }`}
-                >
-                  {s.percentage}%
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {visibleSummary.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {visibleSummary.map((c) => (
+            <div key={c.curso} className="card p-3">
+              <div className="font-black text-[#27407a] text-sm truncate">{c.curso}</div>
+              <div className="text-xs font-bold text-[#6b7aa0] mt-1">
+                {c.total} estudiantes
+              </div>
+              <div
+                className={`text-lg font-black mt-1 ${
+                  c.promedio < umbral ? "text-[#c0392b]" : "text-[#1c7a44]"
+                }`}
+              >
+                {c.promedio}%
+              </div>
+              {c.bajoUmbral > 0 && (
+                <div className="text-xs font-bold text-[#c0392b] mt-0.5">
+                  {c.bajoUmbral} bajo umbral
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {students.length === 0 ? (
+        <div className="text-[#6b7aa0] font-bold py-6">Sin resultados.</div>
+      ) : (
+        <div className="space-y-3">
+          {grupos.map(([curso, items]) => {
+            const promedio =
+              items.length > 0
+                ? Math.round(
+                    items.reduce((sum, s) => sum + s.percentage, 0) / items.length
+                  )
+                : 0;
+            const bajoUmbral = items.filter((s) => s.percentage < umbral).length;
+            return (
+              <CourseAccordion
+                key={curso}
+                curso={curso}
+                expanded={expandedCourses.has(curso)}
+                onToggle={() => toggleCourse(curso)}
+                metrics={
+                  <>
+                    <span className="text-xs font-bold text-[#9aa6bf]">
+                      {items.length} estudiantes
+                    </span>
+                    <span
+                      className={`text-xs font-black ${
+                        promedio < umbral ? "text-[#c0392b]" : "text-[#1c7a44]"
+                      }`}
+                    >
+                      Promedio {promedio}%
+                    </span>
+                    {bajoUmbral > 0 && (
+                      <span className="text-xs font-bold text-[#c0392b]">
+                        {bajoUmbral} bajo umbral
+                      </span>
+                    )}
+                  </>
+                }
+              >
+                <div className="overflow-x-auto">
+                  <table className="text-sm border-collapse w-full">
+                    <thead>
+                      <tr className="bg-[#eef2ff]">
+                        <th className="p-2 text-left">Estudiante</th>
+                        {days.map((d) => (
+                          <th key={d} className="p-1 font-bold">
+                            {d.slice(8)}
+                          </th>
+                        ))}
+                        <th className="p-2">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {items.map((s) => (
+                        <tr key={s.rut} className="border-b border-[#eef2ff]">
+                          <td className="p-2">
+                            <div className="font-bold text-[#27407a]">{s.nombre}</div>
+                          </td>
+                          {days.map((d) => (
+                            <td key={d} className="text-center">
+                              {s.attended.includes(d) ? "✓" : "·"}
+                            </td>
+                          ))}
+                          <td
+                            className={`text-center font-black ${
+                              s.percentage < umbral
+                                ? "text-[#c0392b]"
+                                : "text-[#1c7a44]"
+                            }`}
+                          >
+                            {s.percentage}%
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CourseAccordion>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -1498,31 +1648,93 @@ function PuntualReport({
   branding: Branding;
 }) {
   const [soloPendientes, setSoloPendientes] = useState(false);
+  const [filtroCurso, setFiltroCurso] = useState("");
+  const [expandedCourses, setExpandedCourses] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (filtroCurso) {
+      setExpandedCourses(new Set([filtroCurso]));
+    }
+  }, [filtroCurso]);
+
+  function toggleCourse(curso: string) {
+    setExpandedCourses((prev) => {
+      const next = new Set(prev);
+      if (next.has(curso)) next.delete(curso);
+      else next.add(curso);
+      return next;
+    });
+  }
+
+  const courseSummary: PuntualCourseSummary[] = data.courseSummary || [];
   let students: PuntualStudent[] = data.students || [];
   if (soloPendientes) students = students.filter((s) => !s.delivered);
+  if (filtroCurso) {
+    students = students.filter((s) => (s.curso || "Sin curso") === filtroCurso);
+  }
+  const visibleSummary = filtroCurso
+    ? courseSummary.filter((c) => c.curso === filtroCurso)
+    : courseSummary;
+  const grupos = groupByCurso(students);
 
   function exportPdf() {
-    const rows = (data.students as PuntualStudent[])
+    let exportStudents: PuntualStudent[] = data.students || [];
+    if (soloPendientes) {
+      exportStudents = exportStudents.filter((s) => !s.delivered);
+    }
+    if (filtroCurso) {
+      exportStudents = exportStudents.filter(
+        (s) => (s.curso || "Sin curso") === filtroCurso
+      );
+    }
+    const exportSummary = filtroCurso
+      ? courseSummary.filter((c) => c.curso === filtroCurso)
+      : courseSummary;
+
+    const summaryRows = exportSummary
       .map(
-        (s) => `<tr>
-          <td>${escapeHtml(s.curso || "—")}</td>
-          <td>${escapeHtml(s.nombre)}</td>
-          <td style="text-align:center;color:${s.delivered ? "#1c7a44" : "#c0392b"}">
-            ${s.delivered ? "Entregado" : "Pendiente"}</td>
-          <td style="text-align:center">${s.fecha || "—"}</td>
+        (c) => `<tr>
+          <td>${escapeHtml(c.curso)}</td>
+          <td style="text-align:center">${c.total}</td>
+          <td style="text-align:center;color:#1c7a44">${c.entregados}</td>
+          <td style="text-align:center;color:#c0392b">${c.total - c.entregados}</td>
         </tr>`
       )
       .join("");
+
+    const courseSections = groupByCurso(exportStudents)
+      .map(([curso, list], idx) => {
+        const entregados = list.filter((s) => s.delivered).length;
+        const rows = list
+          .map(
+            (s) => `<tr>
+              <td>${escapeHtml(s.nombre)}</td>
+              <td style="text-align:center;color:${s.delivered ? "#1c7a44" : "#c0392b"}">
+                ${s.delivered ? "Entregado" : "Pendiente"}</td>
+              <td style="text-align:center">${s.fecha || "—"}</td>
+            </tr>`
+          )
+          .join("");
+        return `<div style="page-break-before:${idx > 0 ? "always" : "auto"};margin-top:16px">
+          <h2 style="color:#27407a;font-size:14px">${escapeHtml(curso)} — ${entregados}/${list.length} entregados</h2>
+          <table><thead><tr><th>Nombre</th><th>Estado</th><th>Fecha</th></tr></thead>
+          <tbody>${rows}</tbody></table>
+        </div>`;
+      })
+      .join("");
+
     const w = window.open("", "_blank");
     if (!w) return;
     w.document.write(`<html><head><title>Reporte ${escapeHtml(program.nombre)}</title>
       <style>@page{size:A4;margin:14mm}body{font-family:sans-serif;color:#222}
-      h1{color:#27407a}table{border-collapse:collapse;width:100%;font-size:12px}
+      h1{color:#27407a}h2{color:#27407a}table{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:12px}
       th,td{border:1px solid #ccc;padding:4px 6px}th{background:#eef2ff}</style></head>
       <body>${brandingHeaderHtml(branding)}<h1>${program.icono} ${escapeHtml(program.nombre)}</h1>
       <p>Entregados: ${data.deliveredCount} de ${data.total}</p>
-      <table><thead><tr><th>Curso</th><th>Nombre</th><th>Estado</th><th>Fecha</th></tr></thead>
-      <tbody>${rows}</tbody></table></body></html>`);
+      <h2>Resumen por curso</h2>
+      <table><thead><tr><th>Curso</th><th>Total</th><th>Entregados</th><th>Pendientes</th></tr></thead>
+      <tbody>${summaryRows}</tbody></table>
+      ${courseSections}</body></html>`);
     w.document.close();
     w.focus();
     setTimeout(() => w.print(), 400);
@@ -1549,7 +1761,15 @@ function PuntualReport({
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-3">
+        <div className="w-full sm:w-56">
+          <CursoSelect
+            value={filtroCurso}
+            onChange={setFiltroCurso}
+            className="input-game"
+            emptyLabel="Todos los cursos"
+          />
+        </div>
         <label className="flex items-center gap-2 font-bold text-[#41507a] text-sm">
           <input
             type="checkbox"
@@ -1559,32 +1779,91 @@ function PuntualReport({
           />
           Solo pendientes
         </label>
-        <button onClick={exportPdf} className="btn-game btn-purple !py-2 !px-4 ml-auto">
+        <button onClick={exportPdf} className="btn-game btn-purple !py-2 !px-4 sm:ml-auto">
           🖨️ PDF
         </button>
       </div>
 
-      <div className="space-y-2">
-        {students.map((s) => (
-          <div key={s.rut} className="card p-3 flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <div className="font-bold text-[#27407a] truncate">{s.nombre}</div>
-              <div className="text-xs text-[#9aa6bf]">
-                {[s.curso, formatRut(s.rut)].filter(Boolean).join(" · ")}
-              </div>
-            </div>
-            <span
-              className={`text-xs font-black px-2 py-1 rounded-lg ${
-                s.delivered
-                  ? "bg-[#eafaf0] text-[#1c7a44]"
-                  : "bg-[#fdeaea] text-[#c0392b]"
-              }`}
-            >
-              {s.delivered ? `Entregado${s.fecha ? " · " + s.fecha : ""}` : "Pendiente"}
-            </span>
-          </div>
-        ))}
+      <div className="text-sm font-semibold text-[#6b7aa0]">
+        {students.length} estudiantes · {grupos.length} curso
+        {grupos.length !== 1 ? "s" : ""}
       </div>
+
+      {visibleSummary.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          {visibleSummary.map((c) => (
+            <div key={c.curso} className="card p-3">
+              <div className="font-black text-[#27407a] text-sm truncate">{c.curso}</div>
+              <div className="text-xs font-bold text-[#6b7aa0] mt-1">
+                {c.total} estudiantes
+              </div>
+              <div className="text-lg font-black text-[#1c7a44] mt-1">
+                {c.entregados} entregados
+              </div>
+              {c.total - c.entregados > 0 && (
+                <div className="text-xs font-bold text-[#c0392b] mt-0.5">
+                  {c.total - c.entregados} pendientes
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {students.length === 0 ? (
+        <div className="text-[#6b7aa0] font-bold py-6">Sin resultados.</div>
+      ) : (
+        <div className="space-y-3">
+          {grupos.map(([curso, items]) => {
+            const entregados = items.filter((s) => s.delivered).length;
+            return (
+              <CourseAccordion
+                key={curso}
+                curso={curso}
+                expanded={expandedCourses.has(curso)}
+                onToggle={() => toggleCourse(curso)}
+                metrics={
+                  <>
+                    <span className="text-xs font-bold text-[#9aa6bf]">
+                      {items.length} estudiantes
+                    </span>
+                    <span className="text-xs font-black text-[#1c7a44]">
+                      {entregados} entregados
+                    </span>
+                    {items.length - entregados > 0 && (
+                      <span className="text-xs font-bold text-[#c0392b]">
+                        {items.length - entregados} pendientes
+                      </span>
+                    )}
+                  </>
+                }
+              >
+                {items.map((s) => (
+                  <div key={s.rut} className="card p-3 flex items-center gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="font-bold text-[#27407a] truncate">{s.nombre}</div>
+                      <div className="text-xs text-[#9aa6bf]">
+                        {formatRut(s.rut)}
+                      </div>
+                    </div>
+                    <span
+                      className={`text-xs font-black px-2 py-1 rounded-lg ${
+                        s.delivered
+                          ? "bg-[#eafaf0] text-[#1c7a44]"
+                          : "bg-[#fdeaea] text-[#c0392b]"
+                      }`}
+                    >
+                      {s.delivered
+                        ? `Entregado${s.fecha ? " · " + s.fecha : ""}`
+                        : "Pendiente"}
+                    </span>
+                  </div>
+                ))}
+              </CourseAccordion>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

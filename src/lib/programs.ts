@@ -434,6 +434,13 @@ export interface TemporalReportStudent {
   percentage: number;
 }
 
+export interface TemporalCourseSummary {
+  curso: string;
+  total: number;
+  promedio: number;
+  bajoUmbral: number;
+}
+
 export async function temporalReport(
   db: Db,
   p: ProgramDoc,
@@ -444,6 +451,7 @@ export async function temporalReport(
   serviceDays: number;
   umbral: number;
   students: TemporalReportStudent[];
+  courseSummary: TemporalCourseSummary[];
 }> {
   const m = (month || monthInTZ()).slice(0, 7);
 
@@ -492,13 +500,16 @@ export async function temporalReport(
     return { rut: r.rut, nombre: r.nombre, curso: r.curso, attended, count, percentage };
   });
   sortByCursoNombre(students);
+  const umbral = p.umbralAsistencia;
+  const courseSummary = buildTemporalCourseSummary(students, umbral);
 
   return {
     month: m,
     days: serviceDays,
     serviceDays: totalService,
-    umbral: p.umbralAsistencia,
+    umbral,
     students,
+    courseSummary,
   };
 }
 
@@ -510,10 +521,21 @@ export interface PuntualReportStudent {
   fecha?: string;
 }
 
+export interface PuntualCourseSummary {
+  curso: string;
+  total: number;
+  entregados: number;
+}
+
 export async function puntualReport(
   db: Db,
   p: ProgramDoc
-): Promise<{ students: PuntualReportStudent[]; deliveredCount: number; total: number }> {
+): Promise<{
+  students: PuntualReportStudent[];
+  deliveredCount: number;
+  total: number;
+  courseSummary: PuntualCourseSummary[];
+}> {
   const roster = await rosterFor(db, p);
   const recs = await db
     .collection("program_records")
@@ -530,11 +552,13 @@ export async function puntualReport(
     fecha: byRut.get(r.rut),
   }));
   sortByCursoNombre(students);
+  const courseSummary = buildPuntualCourseSummary(students);
 
   return {
     students,
     deliveredCount: students.filter((s) => s.delivered).length,
     total: students.length,
+    courseSummary,
   };
 }
 
@@ -543,18 +567,20 @@ async function rosterFor(
   db: Db,
   p: ProgramDoc
 ): Promise<{ rut: string; nombre: string; curso: string }[]> {
-  const studentDocs = await db
-    .collection("students")
-    .find({})
-    .project({ rut: 1, nombre: 1, apellidos: 1, curso: 1, enrolled: 1 })
-    .toArray();
-  const studentByRut = new Map(studentDocs.map((s) => [s.rut, s]));
+  const projection = { rut: 1, nombre: 1, apellidos: 1, curso: 1, enrolled: 1 };
 
   if (p.requiereMembresia) {
     const members = await listMembers(db, p);
-    const set = new Set(members.map((m) => m.rut));
+    if (members.length === 0) return [];
     const memberByRut = new Map(members.map((m) => [m.rut, m]));
-    return Array.from(set).map((rut) => {
+    const ruts = members.map((m) => m.rut);
+    const studentDocs = await db
+      .collection("students")
+      .find({ rut: { $in: ruts } })
+      .project(projection)
+      .toArray();
+    const studentByRut = new Map(studentDocs.map((s) => [s.rut, s]));
+    return ruts.map((rut) => {
       const s = studentByRut.get(rut);
       const m = memberByRut.get(rut);
       return {
@@ -568,15 +594,67 @@ async function rosterFor(
       };
     });
   }
-  // Sin membresía: todos los estudiantes enrolados.
-  const ruts = studentDocs.filter((s) => s.enrolled).map((s) => s.rut);
-  return ruts.map((rut) => {
-    const s = studentByRut.get(rut);
-    return {
-      rut,
-      nombre: fullName(s?.nombre || "", s?.apellidos || "") || "Sin nombre",
-      curso: (s?.curso || "") as string,
-    };
+
+  const studentDocs = await db
+    .collection("students")
+    .find({ enrolled: true })
+    .project(projection)
+    .toArray();
+  return studentDocs.map((s) => ({
+    rut: s.rut as string,
+    nombre: fullName(s.nombre || "", s.apellidos || "") || "Sin nombre",
+    curso: (s.curso || "") as string,
+  }));
+}
+
+function buildTemporalCourseSummary(
+  students: TemporalReportStudent[],
+  umbral: number
+): TemporalCourseSummary[] {
+  const byCurso = new Map<string, TemporalReportStudent[]>();
+  for (const s of students) {
+    const key = s.curso || "Sin curso";
+    const arr = byCurso.get(key) || [];
+    arr.push(s);
+    byCurso.set(key, arr);
+  }
+  const summary = Array.from(byCurso.entries()).map(([curso, list]) => {
+    const total = list.length;
+    const promedio =
+      total > 0
+        ? Math.round(list.reduce((sum, s) => sum + s.percentage, 0) / total)
+        : 0;
+    const bajoUmbral = list.filter((s) => s.percentage < umbral).length;
+    return { curso, total, promedio, bajoUmbral };
+  });
+  sortCourseSummary(summary);
+  return summary;
+}
+
+function buildPuntualCourseSummary(
+  students: PuntualReportStudent[]
+): PuntualCourseSummary[] {
+  const byCurso = new Map<string, PuntualReportStudent[]>();
+  for (const s of students) {
+    const key = s.curso || "Sin curso";
+    const arr = byCurso.get(key) || [];
+    arr.push(s);
+    byCurso.set(key, arr);
+  }
+  const summary = Array.from(byCurso.entries()).map(([curso, list]) => ({
+    curso,
+    total: list.length,
+    entregados: list.filter((s) => s.delivered).length,
+  }));
+  sortCourseSummary(summary);
+  return summary;
+}
+
+function sortCourseSummary<T extends { curso: string }>(arr: T[]) {
+  arr.sort((a, b) => {
+    if (a.curso === "Sin curso") return 1;
+    if (b.curso === "Sin curso") return -1;
+    return a.curso.localeCompare(b.curso, "es", { numeric: true });
   });
 }
 

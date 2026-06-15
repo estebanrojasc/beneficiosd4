@@ -68,7 +68,7 @@ export default function LoginPage() {
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
-          placeholder="admin"
+          placeholder="Usuario"
         />
 
         <label className="label-game">Clave</label>
