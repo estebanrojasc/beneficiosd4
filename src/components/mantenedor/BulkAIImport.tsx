@@ -349,6 +349,12 @@ export default function BulkAIImport({
       setMsg("No hay estudiantes seleccionados.");
       return;
     }
+    if (missingCursos.length > 0) {
+      setTab("cursos");
+      setVisible(PAGE_SIZE);
+      setMsg("Antes de cargar, crea o corrige los cursos faltantes.");
+      return;
+    }
     if (
       !confirm(
         esEst
@@ -703,6 +709,26 @@ export default function BulkAIImport({
               </div>
             )}
 
+            {missingCursos.length > 0 && (
+              <div className="mt-3 rounded-2xl border-2 border-[#ffe2bd] bg-[#fff9f1] p-3 text-sm font-bold text-[#b9651b]">
+                Hay {missingCursos.length} curso
+                {missingCursos.length === 1 ? "" : "s"} faltante
+                {missingCursos.length === 1 ? "" : "s"}. Crea{" "}
+                {missingCursos.length === 1 ? "ese curso" : "esos cursos"} o
+                corrige el curso antes de cargar, para que los estudiantes queden
+                bien vinculados.
+                <button
+                  onClick={() => {
+                    setTab("cursos");
+                    setVisible(PAGE_SIZE);
+                  }}
+                  className="ml-2 font-black text-[#e8852c] underline"
+                >
+                  Revisar cursos faltantes
+                </button>
+              </div>
+            )}
+
             <div className="flex flex-wrap gap-2 pt-3 mt-3 border-t-2 border-[#eef2ff]">
               <button
                 onClick={cancel}
@@ -719,8 +745,13 @@ export default function BulkAIImport({
               </button>
               <button
                 onClick={commit}
-                disabled={committing || aCargar === 0}
+                disabled={committing || aCargar === 0 || missingCursos.length > 0}
                 className="btn-game btn-blue flex-1"
+                title={
+                  missingCursos.length > 0
+                    ? "Primero crea o corrige los cursos faltantes"
+                    : undefined
+                }
               >
                 {committing
                   ? esEst
