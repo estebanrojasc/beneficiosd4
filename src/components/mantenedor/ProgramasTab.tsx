@@ -10,6 +10,7 @@ import CursoSelect from "@/components/CursoSelect";
 import RutInput from "@/components/RutInput";
 import FaceCapture from "@/components/FaceCapture";
 import BulkAIImport from "@/components/mantenedor/BulkAIImport";
+import StudentModal, { type StudentLite } from "@/components/mantenedor/StudentModal";
 
 const ICON_CHOICES = ["🍽️", "📦", "🪪", "🎒", "📚", "🎫", "💊", "🧥", "🗂️"];
 
@@ -557,11 +558,13 @@ function MembersSection({
   const [q, setQ] = useState("");
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
-  const [bulk, setBulk] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [aiOpen, setAiOpen] = useState(false);
+  const [bulkSource, setBulkSource] = useState<"archivo" | "texto" | null>(null);
   const [msg, setMsg] = useState("");
   const [enrollRow, setEnrollRow] = useState<MemberView | null>(null);
+  const [editInitial, setEditInitial] = useState<Partial<StudentLite> | null>(
+    null
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -629,22 +632,40 @@ function MembersSection({
     }
   }
 
-  async function importBulk() {
-    setError("");
-    setMsg("");
-    const res = await fetch(`/api/programs/${program._id}/members`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bulk }),
-    });
-    const d = await res.json().catch(() => ({}));
-    if (res.ok) {
-      setMsg(`✅ Agregados: ${d.added} · Inválidos: ${d.invalid}`);
-      setBulk("");
-      load();
-    } else {
-      setError(d.error || "Error en la carga");
+  // Abre la ficha del estudiante para editar (o crearla si aún no existe).
+  async function editMember(m: MemberView) {
+    let st: Partial<StudentLite> | null = null;
+    try {
+      const res = await fetch(
+        `/api/students?q=${encodeURIComponent(m.rut)}`,
+        { cache: "no-store" }
+      );
+      const arr = res.ok ? await res.json() : [];
+      const found = Array.isArray(arr)
+        ? arr.find(
+            (x: { rut?: string }) => normalizeRut(x.rut || "") === m.rut
+          )
+        : null;
+      if (found)
+        st = {
+          _id: found._id,
+          nombre: found.nombre,
+          apellidos: found.apellidos,
+          curso: found.curso,
+          rut: found.rut,
+          enrolled: found.enrolled,
+        };
+    } catch {
+      /* sin conexión: abrimos en modo creación con lo de la lista */
     }
+    setEditInitial(
+      st || {
+        rut: m.rut,
+        nombre: m.nombre,
+        apellidos: m.apellidos,
+        curso: m.curso,
+      }
+    );
   }
 
   async function remove(r: string) {
@@ -733,17 +754,13 @@ function MembersSection({
                   Pegar lista (texto)
                 </div>
                 <p className="text-sm text-[#6b7aa0] font-semibold mb-2">
-                  Una línea por estudiante:{" "}
-                  <code>RUT;Nombre;Apellidos;Nivel;Ciclo;Letra</code> (también
-                  vale solo el RUT).
+                  Pega una lista y revísala (RUT, duplicados y cursos) antes de
+                  agregarla.
                 </p>
-                <textarea
-                  className="input-game min-h-[120px] font-mono text-sm"
-                  value={bulk}
-                  onChange={(e) => setBulk(e.target.value)}
-                  placeholder={"12.345.678-9;Juan;Pérez;3;Básico;A\n11.222.333-4"}
-                />
-                <button onClick={importBulk} className="btn-game btn-purple mt-2">
+                <button
+                  onClick={() => setBulkSource("texto")}
+                  className="btn-game btn-purple"
+                >
                   📥 Importar lista pegada
                 </button>
               </div>
@@ -757,7 +774,7 @@ function MembersSection({
                   estudiantes para revisarlos y agregarlos a esta lista.
                 </p>
                 <button
-                  onClick={() => setAiOpen(true)}
+                  onClick={() => setBulkSource("archivo")}
                   className="btn-game btn-green"
                 >
                   🤖 Carga masiva con IA
@@ -838,16 +855,25 @@ function MembersSection({
                     {m.enrolled ? "Cara ✓" : "Sin cara"}
                   </span>
                   <button
+                    onClick={() => editMember(m)}
+                    className="btn-game btn-orange !py-1.5 !px-3 !text-sm"
+                    title="Editar datos del estudiante"
+                  >
+                    ✏️
+                  </button>
+                  <button
                     onClick={() => setEnrollRow(m)}
                     className={`btn-game !py-1.5 !px-3 !text-sm ${
                       m.enrolled ? "btn-gray" : "btn-purple"
                     }`}
+                    title={m.enrolled ? "Volver a enrolar la cara" : "Enrolar cara"}
                   >
                     {m.enrolled ? "↻" : "📸"}
                   </button>
                   <button
                     onClick={() => remove(m.rut)}
                     className="btn-game btn-red !py-1.5 !px-3 !text-sm"
+                    title="Quitar de la lista"
                   >
                     🗑️
                   </button>
@@ -871,12 +897,25 @@ function MembersSection({
         />
       )}
 
-      {aiOpen && (
+      {bulkSource && (
         <BulkAIImport
+          source={bulkSource}
           programId={program._id ?? ""}
-          onClose={() => setAiOpen(false)}
+          onClose={() => setBulkSource(null)}
           onDone={() => {
-            setAiOpen(false);
+            setBulkSource(null);
+            load();
+            onChanged();
+          }}
+        />
+      )}
+
+      {editInitial && (
+        <StudentModal
+          initial={editInitial}
+          onClose={() => setEditInitial(null)}
+          onSaved={() => {
+            setEditInitial(null);
             load();
             onChanged();
           }}

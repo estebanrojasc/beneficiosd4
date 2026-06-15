@@ -122,6 +122,8 @@ export interface ImportJob {
   _id: string;
   status: ImportStatus;
   programId: string;
+  // Origen del proceso: archivo (IA) o lista pegada (texto).
+  source?: "archivo" | "texto";
   fileName: string;
   comentario: string;
   pageCount: number;

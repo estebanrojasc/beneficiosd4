@@ -57,7 +57,7 @@ function fileToLogoDataUrl(file: File): Promise<string> {
       const img = new Image();
       img.onerror = () => reject(new Error("img"));
       img.onload = () => {
-        const max = 320;
+        const max = 400;
         const scale = Math.min(1, max / Math.max(img.width, img.height));
         const w = Math.round(img.width * scale);
         const h = Math.round(img.height * scale);
@@ -72,7 +72,14 @@ function fileToLogoDataUrl(file: File): Promise<string> {
         } catch {
           // Si falla (p. ej. canvas "tainted"), guardamos la imagen tal cual.
         }
-        resolve(canvas.toDataURL("image/png"));
+        // WebP comprime mucho manteniendo transparencia y calidad. Si el
+        // navegador no lo soporta, toDataURL devuelve PNG automáticamente.
+        const webp = canvas.toDataURL("image/webp", 0.9);
+        resolve(
+          webp.startsWith("data:image/webp")
+            ? webp
+            : canvas.toDataURL("image/png")
+        );
       };
       img.src = reader.result as string;
     };

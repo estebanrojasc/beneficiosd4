@@ -5,6 +5,9 @@ import mammoth from "mammoth";
 import { isValidRut, normalizeRut } from "./rut";
 import { generateStructured, type GeminiPart } from "./gemini";
 import { isMember, addMember, type ProgramDoc } from "./programs";
+import { resolveCursoYear, linkStudentToCurso } from "./cursoServer";
+import { syncAllowedRut } from "./allowedRutsServer";
+import { buildCursoName, getCicloConfig } from "./curso";
 import type { ImportStudent } from "./types";
 
 // Tope de páginas/hojas por archivo: mantiene la extracción precisa y barata.
@@ -149,7 +152,7 @@ function buildPrompt(comentario: string): string {
     "- nombre (nombres de pila)",
     "- apellidos",
     "- rut (RUT chileno, con guión y dígito verificador si aparece; si no hay, déjalo vacío)",
-    "- curso (ej. '1°A Básico', 'Kínder B'; si no aparece en el documento, infiérelo del contexto del usuario)",
+    "- curso usando EXACTAMENTE este formato: 'N° Ciclo Letra' (ej. '3° Básico A', '1° Medio B') o 'Ciclo Letra' para los sin número (ej. 'Kínder B', 'Prekínder A'). Ciclos válidos: Prekínder, Kínder, Básico, Medio. Si no aparece en el documento, infiérelo del contexto del usuario.",
     "No inventes RUTs ni nombres. Si un dato no está, déjalo vacío.",
     comentario
       ? `Contexto entregado por el usuario (úsalo para el curso si falta): ${comentario}`
@@ -178,18 +181,51 @@ export async function runExtraction(
   return Array.isArray(parsed.students) ? parsed.students : [];
 }
 
-// Valida y enriquece cada estudiante para agregarlo a la lista de un programa.
-// - yaExiste: el RUT ya está en la lista (miembro) del programa.
-// - enrolado: el estudiante ya tiene cara registrada en la base.
+// Parsea una lista pegada como texto. Cada línea:
+//   "RUT;Nombre;Apellidos;Nivel;Ciclo;Letra"  (o solo "RUT").
+// Acepta separadores ; , o tabulador. No valida aquí: eso lo hace annotate.
+export function parsePastedList(text: string): RawStudent[] {
+  const lines = (text || "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const out: RawStudent[] = [];
+  for (const line of lines) {
+    const parts = line.split(/[;,\t]/).map((s) => s.trim());
+    const nivel = parts[3] ? Number(parts[3]) : NaN;
+    const ciclo = parts[4] || "";
+    const letra = parts[5] || "";
+    const conf = getCicloConfig(ciclo);
+    const nivelOk = conf
+      ? conf.usaNivel
+        ? Number.isFinite(nivel)
+        : true
+      : false;
+    const curso =
+      conf && nivelOk && letra ? buildCursoName(nivel, ciclo, letra) : "";
+    out.push({
+      rut: parts[0] || "",
+      nombre: parts[1] || "",
+      apellidos: parts[2] || "",
+      curso,
+    });
+  }
+  return out;
+}
+
+// Valida y enriquece cada estudiante extraído.
+// - Con programa: yaExiste = ya es miembro de la lista del programa.
+// - Sin programa (estudiantes del establecimiento): yaExiste = ya está en la
+//   base de estudiantes.
+// - enrolado: el estudiante ya tiene cara registrada.
 export async function annotateStudents(
   db: Db,
-  program: ProgramDoc,
-  raw: RawStudent[]
+  raw: RawStudent[],
+  program?: ProgramDoc | null
 ): Promise<ImportStudent[]> {
   const norms = raw.map((r) => normalizeRut(r.rut || ""));
   const validNorms = norms.filter((n) => n);
 
-  // Estado de enrolamiento (cara) según la base de estudiantes.
   const students = validNorms.length
     ? await db
         .collection("students")
@@ -198,13 +234,18 @@ export async function annotateStudents(
         .toArray()
     : [];
   const enrolledMap = new Map(students.map((d) => [d.rut, Boolean(d.enrolled)]));
+  const existsSet = new Set(students.map((d) => d.rut));
 
   const seen = new Set<string>();
   const out: ImportStudent[] = [];
   for (const r of raw) {
     const norm = normalizeRut(r.rut || "");
     const rutValido = Boolean(norm) && isValidRut(norm);
-    const yaExiste = rutValido ? await isMember(db, program, norm) : false;
+    const yaExiste = !rutValido
+      ? false
+      : program
+      ? await isMember(db, program, norm)
+      : existsSet.has(norm);
     const enrolado = rutValido ? Boolean(enrolledMap.get(norm)) : false;
     const dupEnArchivo = rutValido && seen.has(norm);
     if (rutValido) seen.add(norm);
@@ -224,12 +265,47 @@ export async function annotateStudents(
   return out;
 }
 
-// Agrega los estudiantes seleccionados a la lista del programa. No toca a los
-// que ya son miembros (no pisa datos ni caras). Devuelve un resumen.
+// Crea una ficha de estudiante (sin cara, enrolled=false) y la vincula a su
+// curso. Se usa tanto para la carga global como para la lista de un programa.
+async function createStudentRecord(
+  db: Db,
+  norm: string,
+  s: ImportStudent
+): Promise<void> {
+  const anio = await resolveCursoYear(db, s.curso.trim());
+  const now = new Date().toISOString();
+  const res = await db.collection("students").insertOne({
+    nombre: s.nombre.trim(),
+    apellidos: s.apellidos.trim(),
+    curso: s.curso.trim(),
+    anio,
+    rut: norm,
+    perteneceAlmuerzo: false,
+    faceDescriptor: null,
+    enrolled: false,
+    createdAt: now,
+    updatedAt: now,
+  });
+  await linkStudentToCurso(db, res.insertedId, s.curso.trim());
+  await syncAllowedRut(db, {
+    rut: norm,
+    perteneceAlmuerzo: false,
+    nombre: s.nombre.trim(),
+    apellidos: s.apellidos.trim(),
+    curso: s.curso.trim(),
+  });
+}
+
+// Carga los estudiantes seleccionados.
+// - Con programa: los agrega a la lista Y crea su ficha de estudiante si no
+//   existe (cuando hay nombre + curso). Si falta el curso, queda solo en la
+//   lista como "incompleto" (sin ficha) hasta completarlo.
+// - Sin programa: crea estudiantes del establecimiento (requiere curso).
+// En ningún caso pisa estudiantes ya existentes ni sus caras.
 export async function commitStudents(
   db: Db,
-  program: ProgramDoc,
-  students: ImportStudent[]
+  students: ImportStudent[],
+  program?: ProgramDoc | null
 ): Promise<{ created: number; skipped: number; errors: number }> {
   let created = 0;
   let skipped = 0;
@@ -242,7 +318,9 @@ export async function commitStudents(
       continue;
     }
     const norm = normalizeRut(s.rut);
-    if (!norm || !isValidRut(norm) || !s.nombre.trim()) {
+    // En la carga global el curso es obligatorio; en la lista basta el nombre.
+    const faltaCurso = !program && !s.curso.trim();
+    if (!norm || !isValidRut(norm) || !s.nombre.trim() || faltaCurso) {
       errors++;
       continue;
     }
@@ -252,19 +330,36 @@ export async function commitStudents(
     }
     usados.add(norm);
 
-    if (await isMember(db, program, norm)) {
-      skipped++;
-      continue;
-    }
-
     try {
-      await addMember(db, program, {
-        rut: norm,
-        nombre: s.nombre.trim(),
-        apellidos: s.apellidos.trim(),
-        curso: s.curso.trim(),
-      });
-      created++;
+      if (program) {
+        const alreadyMember = await isMember(db, program, norm);
+        // Asegura la ficha de estudiante (si hay nombre + curso y no existe).
+        if (s.nombre.trim() && s.curso.trim()) {
+          const exists = await db
+            .collection("students")
+            .findOne({ rut: norm });
+          if (!exists) await createStudentRecord(db, norm, s);
+        }
+        if (alreadyMember) {
+          skipped++;
+          continue;
+        }
+        await addMember(db, program, {
+          rut: norm,
+          nombre: s.nombre.trim(),
+          apellidos: s.apellidos.trim(),
+          curso: s.curso.trim(),
+        });
+        created++;
+      } else {
+        const exists = await db.collection("students").findOne({ rut: norm });
+        if (exists) {
+          skipped++;
+          continue;
+        }
+        await createStudentRecord(db, norm, s);
+        created++;
+      }
     } catch {
       errors++;
     }

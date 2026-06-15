@@ -7,15 +7,16 @@ export async function GET() {
   const db = await getDb();
   const settings = await getSettings(db);
   const session = await getSession();
-  // Sin sesión solo exponemos la identidad pública (logo y nombre), que se usa
-  // en la portada, el login y el favicon. Los umbrales y flags quedan privados.
+  const hasLogo = Boolean(settings.logo);
+  // Sin sesión solo exponemos lo público: nombre y si hay logo (NO el base64,
+  // que es pesado). El logo se sirve aparte como imagen en /api/branding/logo.
   if (!session) {
     return NextResponse.json({
       establecimientoNombre: settings.establecimientoNombre,
-      logo: settings.logo,
+      hasLogo,
     });
   }
-  return NextResponse.json(settings);
+  return NextResponse.json({ ...settings, hasLogo });
 }
 
 export async function PUT(req: NextRequest) {

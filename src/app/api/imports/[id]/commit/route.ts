@@ -32,14 +32,18 @@ export async function POST(
   if (!job)
     return NextResponse.json({ error: "Proceso no encontrado" }, { status: 404 });
 
-  const program = await getProgram(db, job.programId || "");
-  if (!program)
-    return NextResponse.json(
-      { error: "Programa no encontrado" },
-      { status: 404 }
-    );
+  // Estudiantes del establecimiento: sin programa. Programa: a su lista.
+  let program = null;
+  if (job.scope !== "estudiantes") {
+    program = await getProgram(db, job.programId || "");
+    if (!program)
+      return NextResponse.json(
+        { error: "Programa no encontrado" },
+        { status: 404 }
+      );
+  }
 
-  const summary = await commitStudents(db, program, students);
+  const summary = await commitStudents(db, students, program);
 
   await db.collection("bulk_imports").updateOne(
     { _id: new ObjectId(id) },

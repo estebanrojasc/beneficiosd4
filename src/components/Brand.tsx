@@ -18,7 +18,7 @@ export function useBranding(): Branding {
         if (on && d)
           setB({
             name: d.establecimientoNombre || "",
-            hasLogo: Boolean(d.logo),
+            hasLogo: Boolean(d.hasLogo ?? d.logo),
           });
       })
       .catch(() => {});

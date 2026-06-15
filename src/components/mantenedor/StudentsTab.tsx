@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import StudentModal, { type StudentLite } from "./StudentModal";
 import CursoSelect from "@/components/CursoSelect";
+import BulkAIImport from "./BulkAIImport";
 import { formatRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
 
@@ -22,6 +23,7 @@ export default function StudentsTab() {
     open: boolean;
     initial?: Partial<StudentLite>;
   }>({ open: false });
+  const [bulkAI, setBulkAI] = useState(false);
 
   const load = useCallback(async (query: string) => {
     setLoading(true);
@@ -79,6 +81,13 @@ export default function StudentsTab() {
           className="btn-game btn-blue whitespace-nowrap"
         >
           ➕ Agregar estudiante
+        </button>
+        <button
+          onClick={() => setBulkAI(true)}
+          className="btn-game btn-gray whitespace-nowrap"
+          title="Sube una lista (PDF, imagen, Excel, Word) y la IA crea los estudiantes"
+        >
+          🤖 Carga masiva con IA
         </button>
       </div>
 
@@ -161,6 +170,17 @@ export default function StudentsTab() {
           onClose={() => setModal({ open: false })}
           onSaved={() => {
             setModal({ open: false });
+            load(q);
+          }}
+        />
+      )}
+
+      {bulkAI && (
+        <BulkAIImport
+          mode="estudiantes"
+          onClose={() => setBulkAI(false)}
+          onDone={() => {
+            setBulkAI(false);
             load(q);
           }}
         />
