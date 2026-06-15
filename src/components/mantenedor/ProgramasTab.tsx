@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import QRCode from "qrcode";
 import type { Program, ProgramModalidad } from "@/lib/types";
-import { isValidRut, formatRut } from "@/lib/rut";
+import { isValidRut, formatRut, normalizeRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
 import CursoSelect from "@/components/CursoSelect";
+import RutInput from "@/components/RutInput";
 import FaceCapture from "@/components/FaceCapture";
 import BulkAIImport from "@/components/mantenedor/BulkAIImport";
 
@@ -596,7 +597,7 @@ function MembersSection({
       setError(d.message || d.error || "No se pudo agregar");
       return;
     }
-    const added = rut;
+    const added = normalizeRut(rut);
     setRut("");
     // Recargamos la lista y revisamos si quedó enrolado (cara registrada).
     let fresh: MemberView[] = [];
@@ -611,9 +612,18 @@ function MembersSection({
     }
     const row = fresh.find((m) => m.rut === added);
     if (row && !row.enrolled) {
-      // No está enrolado: pedimos nombre, apellidos, curso y foto.
-      setMsg("Falta enrolar la cara. Completa los datos y toma la foto.");
-      setEnrollRow(row);
+      // No está enrolado: preguntamos si se quiere enrolar la cara ahora.
+      const nombre = fullName(row.nombre, row.apellidos) || formatRut(row.rut);
+      if (
+        confirm(
+          `${nombre} se agregó a la lista, pero no tiene cara enrolada. ¿Enrolar ahora?`
+        )
+      ) {
+        setMsg("");
+        setEnrollRow(row);
+      } else {
+        setMsg("✅ Agregado (puedes enrolar la cara después con 📸).");
+      }
     } else {
       setMsg("✅ Agregado");
     }
@@ -703,12 +713,7 @@ function MembersSection({
           <div>
             <label className="label-game">Agregar por RUT</label>
             <div className="flex gap-2">
-              <input
-                className="input-game"
-                value={rut}
-                onChange={(e) => setRut(e.target.value)}
-                placeholder="12345678-9"
-              />
+              <RutInput value={rut} onChange={setRut} className="input-game" />
               <button onClick={add} className="btn-game btn-blue !px-4">
                 ➕
               </button>

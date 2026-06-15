@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import CursoSelect from "@/components/CursoSelect";
+import RutInput from "@/components/RutInput";
 import { isValidRut, normalizeRut, formatRut } from "@/lib/rut";
 import { fullName } from "@/lib/curso";
 import type { ImportJob, ImportStudent } from "@/lib/types";
@@ -170,11 +171,12 @@ export default function BulkAIImport({
     onClose();
   }
 
-  const nuevos = students.filter((s) => !s.yaExiste);
-  const existentes = students.filter((s) => s.yaExiste);
-  const aCargar = nuevos.filter((s) => s.incluir).length;
+  const indexedAll = students.map((s, i) => ({ s, i }));
+  const nuevos = indexedAll.filter(({ s }) => !s.yaExiste);
+  const existentes = indexedAll.filter(({ s }) => s.yaExiste);
+  const aCargar = nuevos.filter(({ s }) => s.incluir).length;
   const conProblemas = nuevos.filter(
-    (s) => !s.rutValido || s.dupEnArchivo
+    ({ s }) => !s.rutValido || s.dupEnArchivo
   ).length;
 
   function update(index: number, patch: Partial<ImportStudent>) {
@@ -182,6 +184,17 @@ export default function BulkAIImport({
       const next = prev.map((s, i) => (i === index ? { ...s, ...patch } : s));
       return "rut" in patch ? recompute(next) : next;
     });
+  }
+
+  // Marca/desmarca todos los nuevos válidos (útil con listas largas).
+  function setAllIncluir(val: boolean) {
+    setStudents((prev) =>
+      prev.map((s) =>
+        !s.yaExiste && s.rutValido && !s.dupEnArchivo
+          ? { ...s, incluir: val }
+          : s
+      )
+    );
   }
 
   async function saveProgress() {
@@ -237,8 +250,7 @@ export default function BulkAIImport({
   }
 
   const list = tab === "nuevos" ? nuevos : existentes;
-  const indexed = list.map((s) => ({ s, i: students.indexOf(s) }));
-  const shown = indexed.slice(0, visible);
+  const shown = list.slice(0, visible);
   const groups: Record<string, { s: ImportStudent; i: number }[]> = {};
   for (const it of shown) {
     const key = it.s.curso || "Sin curso";
@@ -399,6 +411,29 @@ export default function BulkAIImport({
                     : `Ya en la lista (${existentes.length})`}
                 </button>
               ))}
+            </div>
+
+            <div className="flex items-center flex-wrap gap-2 mb-2">
+              <span className="text-xs font-bold text-[#9aa6bf]">
+                Mostrando {Math.min(shown.length, list.length)} de {list.length}
+              </span>
+              {tab === "nuevos" && nuevos.length > 0 && (
+                <div className="flex gap-2 ml-auto">
+                  <button
+                    onClick={() => setAllIncluir(true)}
+                    className="text-xs font-bold text-[#4f7cff]"
+                  >
+                    Seleccionar todos
+                  </button>
+                  <span className="text-[#d4dcf0]">·</span>
+                  <button
+                    onClick={() => setAllIncluir(false)}
+                    className="text-xs font-bold text-[#9aa6bf]"
+                  >
+                    Quitar todos
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="max-h-[50vh] overflow-y-auto pr-1 space-y-4">
@@ -574,14 +609,15 @@ function RowEditor({
             />
           </div>
           <div className="flex items-center gap-2">
-            <input
-              className={`input-game !py-1.5 flex-1 font-mono ${
-                s.rutValido ? "" : "!border-[#ef4444]"
-              }`}
-              value={s.rut}
-              onChange={(e) => onChange({ rut: e.target.value })}
-              placeholder="RUT"
-            />
+            <div className="flex-1">
+              <RutInput
+                value={s.rut}
+                onChange={(v) => onChange({ rut: v })}
+                className={`input-game !py-1.5 ${
+                  s.rutValido ? "" : "!border-[#ef4444]"
+                }`}
+              />
+            </div>
             <div className="flex-1">
               <CursoSelect
                 value={s.curso}
