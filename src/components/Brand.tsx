@@ -19,6 +19,49 @@ export function clearBrandingCache() {
   }
 }
 
+function upsertIconLink(rel: string, href: string) {
+  let link = document.querySelector<HTMLLinkElement>(`link[rel="${rel}"]`);
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = rel;
+    document.head.appendChild(link);
+  }
+  link.href = href;
+}
+
+// Refresca inmediatamente el favicon/título en la pestaña actual tras guardar
+// ajustes. Los navegadores cachean el favicon agresivamente, por eso agregamos
+// un bust temporal además de la versión del logo.
+export async function refreshBrandingAssets() {
+  clearBrandingCache();
+  try {
+    const res = await fetch(`/api/branding?ts=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!res.ok) return;
+    const d = await res.json();
+    const next: Branding = {
+      name: d.name || "",
+      hasLogo: Boolean(d.hasLogo),
+      logoVersion: String(d.logoVersion || "0"),
+    };
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(next));
+    } catch {
+      /* ignore */
+    }
+    if (next.name) document.title = next.name;
+    const href = next.hasLogo
+      ? `/api/branding/logo?v=${encodeURIComponent(next.logoVersion)}&ts=${Date.now()}`
+      : `/api/branding/logo?v=0&ts=${Date.now()}`;
+    upsertIconLink("icon", href);
+    upsertIconLink("shortcut icon", href);
+    upsertIconLink("apple-touch-icon", href);
+  } catch {
+    /* ignore */
+  }
+}
+
 // Lee el nombre del establecimiento, si hay logo y la versión del logo.
 // Usa una caché en localStorage para pintar al instante (sin parpadeo) y luego
 // se actualiza con datos frescos del endpoint liviano /api/branding.

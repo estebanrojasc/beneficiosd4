@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { clearBrandingCache } from "@/components/Brand";
+import { refreshBrandingAssets } from "@/components/Brand";
 
 // Límite de imagen original antes de redimensionar (evita lecturas enormes).
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -146,9 +146,8 @@ export default function AjustesTab() {
       });
       if (res.ok) {
         setMsg("✅ Guardado");
-        // Invalida la caché local del branding para que el logo/nombre se
-        // refresquen en el resto del sitio sin tener que limpiar caché.
-        clearBrandingCache();
+        // Actualiza logo, favicon y título en esta pestaña sin limpiar caché.
+        await refreshBrandingAssets();
       } else setMsg("No se pudo guardar");
     } catch {
       setMsg("Error de conexión");
