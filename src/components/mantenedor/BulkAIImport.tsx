@@ -119,7 +119,9 @@ export default function BulkAIImport({
 
   // Revisión
   const [students, setStudents] = useState<ImportStudent[]>([]);
-  const [tab, setTab] = useState<"nuevos" | "existentes" | "cursos">("nuevos");
+  const [tab, setTab] = useState<
+    "nuevos" | "existentes" | "rut" | "cursos"
+  >("nuevos");
   const [cursoSet, setCursoSet] = useState<Set<string>>(new Set());
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [saving, setSaving] = useState(false);
@@ -257,10 +259,10 @@ export default function BulkAIImport({
   const nuevos = indexedAll.filter(({ s }) => !s.yaExiste);
   const existentes = indexedAll.filter(({ s }) => s.yaExiste);
   const aCargar = nuevos.filter(({ s }) => s.incluir).length;
-  const conProblemas = nuevos.filter(
-    ({ s }) =>
-      !s.rutValido || s.dupEnArchivo || (needsCurso && !s.curso.trim())
-  ).length;
+  // RUT con problemas: inválido (formato/dígito verificador) o repetido.
+  const rutProblemas = nuevos.filter(
+    ({ s }) => !s.rutValido || s.dupEnArchivo
+  );
 
   // ¿El curso (no vacío) existe en el sistema? Si no, va a "Cursos faltantes".
   const cursoFalta = useCallback(
@@ -302,7 +304,15 @@ export default function BulkAIImport({
   function update(index: number, patch: Partial<ImportStudent>) {
     setStudents((prev) => {
       const next = prev.map((s, i) => (i === index ? { ...s, ...patch } : s));
-      return "rut" in patch ? recompute(next) : next;
+      if (!("rut" in patch)) return next;
+      // Al corregir el RUT y quedar válido (y sin duplicar/existir), lo dejamos
+      // seleccionado para cargar.
+      const rec = recompute(next);
+      return rec.map((s, i) =>
+        i === index && s.rutValido && !s.dupEnArchivo && !s.yaExiste
+          ? { ...s, incluir: true }
+          : s
+      );
     });
   }
 
@@ -376,7 +386,14 @@ export default function BulkAIImport({
     onClose();
   }
 
-  const list = tab === "nuevos" ? nuevos : existentes;
+  const list =
+    tab === "nuevos"
+      ? nuevos
+      : tab === "existentes"
+      ? existentes
+      : tab === "rut"
+      ? rutProblemas
+      : [];
   const shown = list.slice(0, visible);
   const groups: Record<string, { s: ImportStudent; i: number }[]> = {};
   for (const it of shown) {
@@ -542,10 +559,13 @@ export default function BulkAIImport({
               <span className="rounded-full bg-[#eef2ff] text-[#41507a] px-3 py-1">
                 {existentes.length} {esEst ? "ya existen" : "ya en la lista"}
               </span>
-              {conProblemas > 0 && (
-                <span className="rounded-full bg-[#fdeaea] text-[#c0392b] px-3 py-1">
-                  {conProblemas} con problemas
-                </span>
+              {rutProblemas.length > 0 && (
+                <button
+                  onClick={() => setTab("rut")}
+                  className="rounded-full bg-[#fdeaea] text-[#c0392b] px-3 py-1"
+                >
+                  {rutProblemas.length} RUT a revisar
+                </button>
               )}
               {missingCursos.length > 0 && (
                 <button
@@ -566,6 +586,14 @@ export default function BulkAIImport({
                     ? `Ya existen (${existentes.length})`
                     : `Ya en la lista (${existentes.length})`,
                 },
+                ...(rutProblemas.length > 0
+                  ? [
+                      {
+                        k: "rut" as const,
+                        label: `RUT a revisar (${rutProblemas.length})`,
+                      },
+                    ]
+                  : []),
                 ...(missingCursos.length > 0
                   ? [
                       {
@@ -585,6 +613,8 @@ export default function BulkAIImport({
                     tab === k
                       ? k === "cursos"
                         ? "bg-[#e8852c] text-white shadow"
+                        : k === "rut"
+                        ? "bg-[#d6453f] text-white shadow"
                         : "bg-[#4f7cff] text-white shadow"
                       : "bg-white text-[#41507a] border-2 border-[#eef2ff]"
                   }`}
@@ -640,6 +670,8 @@ export default function BulkAIImport({
                 <div className="card p-6 text-center text-[#6b7aa0] font-semibold">
                   {tab === "nuevos"
                     ? "No hay estudiantes nuevos."
+                    : tab === "rut"
+                    ? "No hay RUT con problemas. 🎉"
                     : esEst
                     ? "Ningún estudiante del archivo existe aún."
                     : "Ningún estudiante de la lista está aún en el programa."}
@@ -764,7 +796,7 @@ function RowEditor({
   onChange,
 }: {
   s: ImportStudent;
-  tab: "nuevos" | "existentes" | "cursos";
+  tab: "nuevos" | "existentes" | "rut" | "cursos";
   needsCurso?: boolean;
   cursoMissing?: boolean;
   onChange: (patch: Partial<ImportStudent>) => void;
