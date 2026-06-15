@@ -556,25 +556,6 @@ export default function BulkAIImport({
               <span className="rounded-full bg-[#eafaf0] text-[#1c7a44] px-3 py-1">
                 {aCargar} {esEst ? "a cargar" : "a agregar"}
               </span>
-              <span className="rounded-full bg-[#eef2ff] text-[#41507a] px-3 py-1">
-                {existentes.length} {esEst ? "ya existen" : "ya en la lista"}
-              </span>
-              {rutProblemas.length > 0 && (
-                <button
-                  onClick={() => setTab("rut")}
-                  className="rounded-full bg-[#fdeaea] text-[#c0392b] px-3 py-1"
-                >
-                  {rutProblemas.length} RUT a revisar
-                </button>
-              )}
-              {missingCursos.length > 0 && (
-                <button
-                  onClick={() => setTab("cursos")}
-                  className="rounded-full bg-[#fff3e0] text-[#b9651b] px-3 py-1"
-                >
-                  {missingCursos.length} curso(s) no existen
-                </button>
-              )}
             </div>
 
             <div className="flex gap-2 mb-3 flex-wrap">
