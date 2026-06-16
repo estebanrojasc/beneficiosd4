@@ -31,6 +31,63 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+function resizeImageIfNeeded(file: File, maxDimension = 2000): Promise<File> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith("image/")) {
+      return resolve(file);
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const needsResize = img.width > maxDimension || img.height > maxDimension;
+        if (!needsResize && file.size <= 1.5 * 1024 * 1024) {
+          // Si ya es pequeña en dimensiones y peso, la dejamos tal cual
+          return resolve(file);
+        }
+
+        const scale = needsResize
+          ? Math.min(maxDimension / img.width, maxDimension / img.height)
+          : 1;
+        const width = Math.round(img.width * scale);
+        const height = Math.round(img.height * scale);
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          return resolve(file);
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Guardamos como JPEG (comprime muy bien para texto escaneado/fotografiado)
+        // o PNG si originalmente era PNG
+        const outputMime = file.type === "image/png" ? "image/png" : "image/jpeg";
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              return resolve(file);
+            }
+            const resizedFile = new File([blob], file.name, {
+              type: outputMime,
+              lastModified: Date.now(),
+            });
+            resolve(resizedFile);
+          },
+          outputMime,
+          0.85 // Calidad alta del 85% para mantener las letras nítidas
+        );
+      };
+      img.onerror = () => reject(new Error("No se pudo cargar la imagen para procesarla."));
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = () => reject(new Error("Error al leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // Recalcula validaciones locales (RUT válido y duplicado dentro del archivo).
 function recompute(students: ImportStudent[]): ImportStudent[] {
   const counts = new Map<string, number>();
@@ -470,18 +527,40 @@ export default function BulkAIImport({
                     type="file"
                     accept={ACCEPT}
                     className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0] || null;
+                    onChange={async (e) => {
+                      let f = e.target.files?.[0] || null;
                       e.target.value = "";
-                      if (f && f.size > MAX_FILE_BYTES) {
-                        setFile(null);
-                        setError(
-                          "El archivo es muy grande (máx. 3,5 MB). Comprímelo o divídelo."
-                        );
-                        return;
-                      }
-                      setFile(f);
+                      if (!f) return;
+
                       setError("");
+
+                      if (f.type.startsWith("image/")) {
+                        const MAX_RAW_IMAGE_SIZE = 15 * 1024 * 1024; // Permitimos hasta 15MB ya que la comprimiremos
+                        if (f.size > MAX_RAW_IMAGE_SIZE) {
+                          setFile(null);
+                          setError("La imagen original es demasiado grande (máx. 15 MB).");
+                          return;
+                        }
+                        setError("Comprimiendo imagen...");
+                        try {
+                          f = await resizeImageIfNeeded(f);
+                          setError("");
+                        } catch (err) {
+                          setFile(null);
+                          setError(err instanceof Error ? err.message : "Error al procesar la imagen.");
+                          return;
+                        }
+                      } else {
+                        if (f.size > MAX_FILE_BYTES) {
+                          setFile(null);
+                          setError(
+                            "El archivo es muy grande (máx. 3,5 MB). Comprímelo o divídelo."
+                          );
+                          return;
+                        }
+                      }
+
+                      setFile(f);
                     }}
                   />
                   {file ? (
