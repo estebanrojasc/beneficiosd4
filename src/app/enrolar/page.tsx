@@ -93,6 +93,13 @@ export default function EnrolarPage() {
           );
           return;
         }
+        if (data.error === "CONSENT_REQUIRED") {
+          setError(
+            data.message ||
+              "Tu apoderado debe firmar la autorización antes de registrar tu cara."
+          );
+          return;
+        }
         setError(data.error || "No se pudo enrolar.");
         return;
       }
@@ -192,6 +199,14 @@ export default function EnrolarPage() {
               onCapture={setDescriptor}
               captured={Boolean(descriptor)}
             />
+
+            <p className="mt-3 text-center text-xs text-[#9aa6bf] font-semibold">
+              Tu rostro se convierte en un código matemático; no se guarda ninguna
+              foto.{" "}
+              <Link href="/privacidad" className="underline text-[#6b7aa0]">
+                Cómo tratamos tus datos
+              </Link>
+            </p>
 
             {error && (
               <div className="mt-4 text-center font-bold text-[#ef4444]">

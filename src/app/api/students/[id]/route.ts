@@ -12,6 +12,36 @@ import { syncAllowedRut } from "@/lib/allowedRutsServer";
 import { findDuplicateFace } from "@/lib/faceMatchServer";
 import { getSettings } from "@/lib/settings";
 import { fullName } from "@/lib/curso";
+import { isConsentGranted, isConsentBypassEnabled } from "@/lib/consentServer";
+import { encryptDescriptor } from "@/lib/crypto";
+import { logAudit, ipFromRequest } from "@/lib/audit";
+
+// Devuelve un estudiante por id (sin el descriptor facial). Se usa, entre
+// otras cosas, para imprimir el documento de autorización del apoderado.
+export async function GET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await getSession();
+  if (!session)
+    return NextResponse.json({ error: "No autorizado" }, { status: 401 });
+
+  const { id } = await params;
+  if (!ObjectId.isValid(id))
+    return NextResponse.json({ error: "ID inválido" }, { status: 400 });
+
+  const db = await getDb();
+  const doc = await db
+    .collection("students")
+    .findOne(
+      { _id: new ObjectId(id) },
+      { projection: { faceDescriptor: 0 } }
+    );
+  if (!doc)
+    return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+
+  return NextResponse.json({ ...doc, _id: doc._id.toString() });
+}
 
 export async function PUT(
   req: NextRequest,
@@ -39,11 +69,32 @@ export async function PUT(
     update.rut = normalizeRut(body.rut);
   }
   if (Array.isArray(body.faceDescriptor)) {
-    update.faceDescriptor = body.faceDescriptor;
+    update.faceDescriptor =
+      body.faceDescriptor.length > 0
+        ? encryptDescriptor(body.faceDescriptor)
+        : null;
     update.enrolled = body.faceDescriptor.length > 0;
   }
 
   const db = await getDb();
+
+  // La biometría (cara) solo se puede registrar si el apoderado autorizó.
+  if (Array.isArray(body.faceDescriptor) && body.faceDescriptor.length > 0) {
+    const current = await db
+      .collection("students")
+      .findOne({ _id: new ObjectId(id) }, { projection: { consent: 1 } });
+    if (!isConsentGranted(current?.consent) && !isConsentBypassEnabled()) {
+      return NextResponse.json(
+        {
+          error: "CONSENT_REQUIRED",
+          message:
+            "No se puede registrar la cara sin la autorización firmada del " +
+            "apoderado. Registra primero la autorización.",
+        },
+        { status: 409 }
+      );
+    }
+  }
 
   // No se permite re-enrolar con una cara idéntica a la de otro estudiante.
   if (
@@ -112,6 +163,19 @@ export async function PUT(
     });
   }
 
+  // Auditoría: se reemplazó/actualizó la cara del estudiante.
+  if (Array.isArray(body.faceDescriptor) && body.faceDescriptor.length > 0) {
+    await logAudit(db, {
+      action: "face.update",
+      actor: session.username,
+      actorType: "admin",
+      rut: saved?.rut,
+      studentId: id,
+      detail: "Reemplazo de la cara registrada",
+      ip: ipFromRequest(req),
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }
 
@@ -131,7 +195,10 @@ export async function DELETE(
   // Recuperamos el RUT antes de borrar para limpiar sus listas asociadas.
   const doc = await db
     .collection("students")
-    .findOne({ _id: new ObjectId(id) }, { projection: { rut: 1 } });
+    .findOne(
+      { _id: new ObjectId(id) },
+      { projection: { rut: 1, enrolled: 1 } }
+    );
   await db.collection("students").deleteOne({ _id: new ObjectId(id) });
   await unlinkStudentFromCursos(db, new ObjectId(id));
 
@@ -141,5 +208,17 @@ export async function DELETE(
     await db.collection("allowedRuts").deleteOne({ rut: doc.rut });
     await db.collection("program_members").deleteMany({ rut: doc.rut });
   }
+
+  // Auditoría: supresión del titular (derecho de supresión).
+  await logAudit(db, {
+    action: "student.delete",
+    actor: session.username,
+    actorType: "admin",
+    rut: doc?.rut,
+    studentId: id,
+    detail: "Eliminación del estudiante y sus datos",
+    meta: { teniaCara: Boolean(doc?.enrolled) },
+    ip: ipFromRequest(req),
+  });
   return NextResponse.json({ ok: true });
 }

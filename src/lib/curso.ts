@@ -62,3 +62,23 @@ export function splitNombreCompleto(nombreCompleto: string): {
 export function fullName(nombre: string, apellidos?: string): string {
   return [nombre.trim(), (apellidos || "").trim()].filter(Boolean).join(" ");
 }
+
+// Criterio de orden para los listados de estudiantes.
+export type NameSort = "apellidos" | "nombre";
+
+// Compara dos estudiantes por apellido o por nombre (con desempate en el otro).
+export function compareByName(
+  a: { nombre?: string; apellidos?: string },
+  b: { nombre?: string; apellidos?: string },
+  sortBy: NameSort
+): number {
+  const ap = (s: { apellidos?: string }) => (s.apellidos || "").trim();
+  const no = (s: { nombre?: string }) => (s.nombre || "").trim();
+  const opts = { sensitivity: "base" as const, numeric: true };
+  if (sortBy === "apellidos") {
+    const c = ap(a).localeCompare(ap(b), "es", opts);
+    return c !== 0 ? c : no(a).localeCompare(no(b), "es", opts);
+  }
+  const c = no(a).localeCompare(no(b), "es", opts);
+  return c !== 0 ? c : ap(a).localeCompare(ap(b), "es", opts);
+}

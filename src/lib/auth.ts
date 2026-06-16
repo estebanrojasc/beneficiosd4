@@ -4,9 +4,43 @@ import type { CapKey, UserRole } from "./types";
 import { getDb } from "./mongodb";
 import { getRoleCaps } from "./roles";
 
-const SECRET = process.env.AUTH_SECRET || "cambia-este-secreto-en-produccion";
 const COOKIE_NAME = "almuerzo_session";
 const MAX_AGE = 60 * 60 * 12; // 12 horas
+
+// Valores por defecto inseguros que NO se aceptan en producción.
+const WEAK_SECRETS = new Set([
+  "cambia-este-secreto-en-produccion",
+  "1234567890",
+  "secret",
+  "changeme",
+]);
+
+let warnedWeakSecret = false;
+
+// Devuelve el secreto para firmar/verificar la sesión. En producción exige un
+// secreto fuerte (fail-closed): si falta o es débil, lanza y no autentica. En
+// desarrollo permite continuar con una advertencia para no frenar el trabajo.
+function getSecret(): string {
+  const secret = process.env.AUTH_SECRET;
+  const weak = !secret || secret.length < 16 || WEAK_SECRETS.has(secret);
+  if (weak) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "AUTH_SECRET inseguro o ausente. Define un AUTH_SECRET largo y " +
+          "aleatorio en el entorno antes de desplegar."
+      );
+    }
+    if (!warnedWeakSecret) {
+      console.warn(
+        "[auth] AUTH_SECRET débil o ausente: usando un valor de desarrollo. " +
+          "Configura uno fuerte antes de producción."
+      );
+      warnedWeakSecret = true;
+    }
+    return secret || "dev-insecure-secret-do-not-use-in-prod";
+  }
+  return secret;
+}
 
 export interface SessionPayload {
   userId: string;
@@ -18,12 +52,12 @@ export interface SessionPayload {
 }
 
 export function signSession(payload: SessionPayload): string {
-  return jwt.sign(payload, SECRET, { expiresIn: MAX_AGE });
+  return jwt.sign(payload, getSecret(), { expiresIn: MAX_AGE });
 }
 
 export function verifySession(token: string): SessionPayload | null {
   try {
-    return jwt.verify(token, SECRET) as SessionPayload;
+    return jwt.verify(token, getSecret()) as SessionPayload;
   } catch {
     return null;
   }

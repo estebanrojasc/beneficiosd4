@@ -1,26 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Db } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { normalizeRut } from "@/lib/rut";
 import { dateInTZ } from "@/lib/date";
+import { isKioskTokenValid } from "@/lib/programs";
 
 function today(): string {
   return dateInTZ();
 }
 
-function authorized(req: NextRequest, session: unknown): boolean {
+// Autoriza por sesión de admin o por la clave de validador de algún programa.
+async function authorized(
+  req: NextRequest,
+  session: unknown,
+  db: Db
+): Promise<boolean> {
   if (session) return true;
   const token =
     req.headers.get("x-kiosk-token") ||
     req.nextUrl.searchParams.get("token") ||
     "";
-  return token === (process.env.KIOSK_TOKEN || "kiosko2026");
+  return isKioskTokenValid(db, token);
 }
 
 // Marca asistencia al almuerzo. Evita duplicados por RUT en el mismo día.
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!authorized(req, session))
+  const db = await getDb();
+  if (!(await authorized(req, session, db)))
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -35,7 +43,6 @@ export async function POST(req: NextRequest) {
   if (!rut)
     return NextResponse.json({ error: "Falta el RUT" }, { status: 400 });
 
-  const db = await getDb();
   const fecha = today();
   const norm = normalizeRut(rut);
 
@@ -70,11 +77,11 @@ export async function POST(req: NextRequest) {
 // Lista la asistencia de un día (por defecto hoy).
 export async function GET(req: NextRequest) {
   const session = await getSession();
-  if (!authorized(req, session))
+  const db = await getDb();
+  if (!(await authorized(req, session, db)))
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const fecha = req.nextUrl.searchParams.get("fecha") || today();
-  const db = await getDb();
   const day = await db.collection("attendance").findOne({ fecha });
 
   return NextResponse.json({

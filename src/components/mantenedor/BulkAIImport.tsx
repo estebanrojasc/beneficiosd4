@@ -230,6 +230,10 @@ export default function BulkAIImport({
       alert("Espera a que termine el procesamiento.");
       return;
     }
+    if (committing) {
+      alert("Espera a que termine de agregar.");
+      return;
+    }
     if (phase === "done" || phase === "loading") {
       onClose();
       return;
@@ -556,7 +560,9 @@ export default function BulkAIImport({
           </div>
         )}
 
-        {phase === "review" && (
+        {phase === "review" && committing && <CommitStepper esEst={esEst} />}
+
+        {phase === "review" && !committing && (
           <>
             <div className="flex gap-2 flex-wrap text-sm font-bold mb-3">
               <span className="rounded-full bg-[#eafaf0] text-[#1c7a44] px-3 py-1">
@@ -577,7 +583,7 @@ export default function BulkAIImport({
                   ? [
                       {
                         k: "rut" as const,
-                        label: `RUT a revisar (${rutProblemas.length})`,
+                        label: `⚠️ RUT a revisar (${rutProblemas.length})`,
                       },
                     ]
                   : []),
@@ -585,30 +591,43 @@ export default function BulkAIImport({
                   ? [
                       {
                         k: "cursos" as const,
-                        label: `Cursos faltantes (${missingCursos.length})`,
+                        label: `⚠️ Cursos faltantes (${missingCursos.length})`,
                       },
                     ]
                   : []),
-              ].map(({ k, label }) => (
-                <button
-                  key={k}
-                  onClick={() => {
-                    setTab(k);
-                    setVisible(PAGE_SIZE);
-                  }}
-                  className={`rounded-2xl px-4 py-2 font-extrabold transition ${
-                    tab === k
-                      ? k === "cursos"
-                        ? "bg-[#e8852c] text-white shadow"
-                        : k === "rut"
-                        ? "bg-[#d6453f] text-white shadow"
-                        : "bg-[#4f7cff] text-white shadow"
-                      : "bg-white text-[#41507a] border-2 border-[#eef2ff]"
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
+              ].map(({ k, label }) => {
+                const activo = tab === k;
+                let cls: string;
+                if (activo) {
+                  cls =
+                    k === "cursos"
+                      ? "bg-[#e8852c] text-white shadow"
+                      : k === "rut"
+                      ? "bg-[#d6453f] text-white shadow"
+                      : "bg-[#4f7cff] text-white shadow";
+                } else if (k === "cursos") {
+                  // Pendiente por resolver: destacado en naranja aunque no esté activo.
+                  cls =
+                    "bg-[#fff3e0] text-[#b9651b] border-2 border-[#f3c98b] animate-pulse";
+                } else if (k === "rut") {
+                  cls =
+                    "bg-[#fdeaea] text-[#c0392b] border-2 border-[#f3b4b1] animate-pulse";
+                } else {
+                  cls = "bg-white text-[#41507a] border-2 border-[#eef2ff]";
+                }
+                return (
+                  <button
+                    key={k}
+                    onClick={() => {
+                      setTab(k);
+                      setVisible(PAGE_SIZE);
+                    }}
+                    className={`rounded-2xl px-4 py-2 font-extrabold transition ${cls}`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
 
             {tab === "cursos" ? (
@@ -774,11 +793,40 @@ function Stepper({ texto = false }: { texto?: boolean }) {
     ? ["Leyendo la lista", "Validando RUT y cursos"]
     : ["Leyendo el archivo", "Enviando a la IA", "Estructurando estudiantes"];
   return (
+    <LoaderSteps
+      emoji={texto ? "📋" : "🤖"}
+      title={texto ? "Procesando lista..." : "Procesando con IA..."}
+      steps={steps}
+    />
+  );
+}
+
+function CommitStepper({ esEst }: { esEst: boolean }) {
+  const steps = esEst
+    ? ["Creando fichas de estudiantes", "Vinculando a sus cursos"]
+    : ["Agregando a la lista", "Creando fichas y enlaces"];
+  return (
+    <LoaderSteps
+      emoji="💾"
+      title={esEst ? "Cargando estudiantes..." : "Agregando a la lista..."}
+      steps={steps}
+    />
+  );
+}
+
+function LoaderSteps({
+  emoji,
+  title,
+  steps,
+}: {
+  emoji: string;
+  title: string;
+  steps: string[];
+}) {
+  return (
     <div className="py-8 text-center">
-      <div className="text-5xl mb-4 animate-bounce">{texto ? "📋" : "🤖"}</div>
-      <div className="font-black text-[#27407a] mb-4">
-        {texto ? "Procesando lista..." : "Procesando con IA..."}
-      </div>
+      <div className="text-5xl mb-4 animate-bounce">{emoji}</div>
+      <div className="font-black text-[#27407a] mb-4">{title}</div>
       <div className="space-y-2 max-w-xs mx-auto text-left">
         {steps.map((s, i) => (
           <div

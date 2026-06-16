@@ -8,6 +8,7 @@ import {
   queueAttendance,
   getQueue,
   clearQueueItems,
+  clearDescriptors,
 } from "./offline-db";
 
 export function getKioskToken(): string {
@@ -16,7 +17,13 @@ export function getKioskToken(): string {
 }
 
 export function setKioskToken(token: string) {
+  const prev = localStorage.getItem("kioskToken") || "";
   localStorage.setItem("kioskToken", token);
+  // Si cambia la clave del validador, la caché cifrada con la clave anterior ya
+  // no sirve (y no debe quedar accesible): la descartamos.
+  if (prev && prev !== token) {
+    void clearDescriptors();
+  }
 }
 
 export interface StudentSearchResult {
@@ -59,15 +66,15 @@ export async function loadDescriptors(): Promise<{
       cache: "no-store",
     });
     if (res.status === 401) {
-      const cached = await getDescriptors();
+      const cached = await getDescriptors(token);
       return { entries: cached, source: "cache", authError: true };
     }
     const data = await res.json();
     const entries: FaceDescriptorEntry[] = data.entries || [];
-    await saveDescriptors(entries);
+    await saveDescriptors(entries, token);
     return { entries, source: "network" };
   } catch {
-    const cached = await getDescriptors();
+    const cached = await getDescriptors(token);
     return { entries: cached, source: "cache" };
   }
 }

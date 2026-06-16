@@ -138,6 +138,14 @@ export default function RegistroProgramaPage() {
 
             <FaceCapture onCapture={setDescriptor} captured={Boolean(descriptor)} />
 
+            <p className="mt-3 text-center text-xs text-[#9aa6bf] font-semibold">
+              Tu rostro se convierte en un código matemático; no se guarda ninguna
+              foto.{" "}
+              <a href="/privacidad" className="underline text-[#6b7aa0]">
+                Cómo tratamos tus datos
+              </a>
+            </p>
+
             {error && (
               <div className="mt-4 text-center font-bold text-[#ef4444]">
                 {error}

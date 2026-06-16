@@ -99,6 +99,10 @@ async function ensureIndexes(db: Db): Promise<void> {
           .collection("programs")
           .createIndex({ slug: 1 }, { sparse: true });
         await db.collection("programs").createIndex({ estado: 1, nombre: 1 });
+        // Auditoría: consultas por fecha (orden) y por acción/RUT afectado.
+        await db.collection("audit_logs").createIndex({ at: -1 });
+        await db.collection("audit_logs").createIndex({ action: 1, at: -1 });
+        await db.collection("audit_logs").createIndex({ rut: 1, at: -1 });
       } catch (err) {
         console.warn(
           "[mongodb] No se pudieron crear todos los índices únicos. " +

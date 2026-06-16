@@ -2,6 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { refreshBrandingAssets } from "@/components/Brand";
+import ConsentTextEditor from "@/components/mantenedor/ConsentTextEditor";
+import {
+  getConsentSections,
+  resolveConsentSections,
+  type ConsentSection,
+} from "@/lib/consent";
 
 // Límite de imagen original antes de redimensionar (evita lecturas enormes).
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -93,9 +99,21 @@ export default function AjustesTab() {
   const [umbralCara, setUmbralCara] = useState(75);
   const [nombreEst, setNombreEst] = useState("");
   const [logo, setLogo] = useState("");
+  const [responsable, setResponsable] = useState("");
+  const [dpoNombre, setDpoNombre] = useState("");
+  const [dpoContacto, setDpoContacto] = useState("");
+  const [retencionMeses, setRetencionMeses] = useState(0);
+  const [purgaAnio, setPurgaAnio] = useState(false);
+  const [proveedorNombre, setProveedorNombre] = useState("");
+  const [proveedorContacto, setProveedorContacto] = useState("");
+  const [consentTextos, setConsentTextos] = useState<ConsentSection[]>([]);
+  const [canEditTextos, setCanEditTextos] = useState(false);
+  const [showTextEditor, setShowTextEditor] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
+  const [retMsg, setRetMsg] = useState("");
+  const [retRunning, setRetRunning] = useState(false);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -106,9 +124,28 @@ export default function AjustesTab() {
         if (typeof data?.establecimientoNombre === "string")
           setNombreEst(data.establecimientoNombre);
         if (typeof data?.logo === "string") setLogo(data.logo);
+        if (typeof data?.responsableTratamiento === "string")
+          setResponsable(data.responsableTratamiento);
+        if (typeof data?.dpoNombre === "string") setDpoNombre(data.dpoNombre);
+        if (typeof data?.dpoContacto === "string")
+          setDpoContacto(data.dpoContacto);
+        if (Number.isFinite(Number(data?.retencionMeses)))
+          setRetencionMeses(Number(data.retencionMeses));
+        setPurgaAnio(Boolean(data?.retencionPurgaAnioAnterior));
+        if (typeof data?.proveedorNombre === "string")
+          setProveedorNombre(data.proveedorNombre);
+        if (typeof data?.proveedorContacto === "string")
+          setProveedorContacto(data.proveedorContacto);
+        if (Array.isArray(data?.consentTextos))
+          setConsentTextos(data.consentTextos);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    fetch("/api/auth/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanEditTextos(Boolean(d?.caps?.textosLegales)))
+      .catch(() => {});
   }, []);
 
   async function onLogoFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -142,6 +179,11 @@ export default function AjustesTab() {
           umbralCaraDuplicada: umbralCara / 100,
           establecimientoNombre: nombreEst,
           logo,
+          responsableTratamiento: responsable,
+          dpoNombre,
+          dpoContacto,
+          retencionMeses,
+          retencionPurgaAnioAnterior: purgaAnio,
         }),
       });
       if (res.ok) {
@@ -155,6 +197,47 @@ export default function AjustesTab() {
       setSaving(false);
     }
   }
+
+  async function applyRetention() {
+    if (
+      !confirm(
+        "Esto eliminará la biometría de los estudiantes que cumplan los " +
+          "criterios de retención. No se puede deshacer. ¿Continuar?"
+      )
+    )
+      return;
+    setRetRunning(true);
+    setRetMsg("");
+    try {
+      const res = await fetch("/api/retention", { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setRetMsg(
+          data.purged > 0
+            ? `✅ Biometría eliminada en ${data.purged} estudiante(s).`
+            : "No había biometría que cumpliera los criterios."
+        );
+      } else {
+        setRetMsg(data.error || "No se pudo aplicar la retención.");
+      }
+    } catch {
+      setRetMsg("Error de conexión.");
+    } finally {
+      setRetRunning(false);
+    }
+  }
+
+  const orgInfo = {
+    establecimiento: nombreEst,
+    responsable,
+    dpoNombre,
+    dpoContacto,
+    proveedorNombre,
+    proveedorContacto,
+  };
+  const defaultSections = getConsentSections(orgInfo);
+  const effectiveSections = resolveConsentSections(orgInfo, consentTextos);
+  const hasOverride = consentTextos.length > 0;
 
   return (
     <div className="animate-pop max-w-xl mx-auto space-y-5">
@@ -254,6 +337,158 @@ export default function AjustesTab() {
           <div className="mt-3 font-bold text-center text-[#22a558]">{msg}</div>
         )}
       </div>
+
+      <div className="card p-6">
+        <h3 className="text-xl font-black text-[#27407a] mb-1">
+          Protección de datos (Ley 21.719)
+        </h3>
+        <p className="text-sm text-[#6b7aa0] font-semibold mb-4">
+          Datos del responsable y del Encargado de Protección de Datos (DPO).
+          Aparecen en la política de privacidad y en el documento de
+          autorización que firma el apoderado.
+        </p>
+        {!loading && (
+          <>
+            <label className="label-game">
+              Responsable del tratamiento (opcional)
+            </label>
+            <input
+              className="input-game mb-4"
+              value={responsable}
+              onChange={(e) => setResponsable(e.target.value)}
+              placeholder="Si difiere del nombre del establecimiento"
+            />
+
+            <label className="label-game">
+              Encargado de Protección de Datos (DPO)
+            </label>
+            <input
+              className="input-game mb-4"
+              value={dpoNombre}
+              onChange={(e) => setDpoNombre(e.target.value)}
+              placeholder="Ej: Juan Pérez / Dirección"
+            />
+
+            <label className="label-game">Contacto del DPO</label>
+            <input
+              className="input-game"
+              value={dpoContacto}
+              onChange={(e) => setDpoContacto(e.target.value)}
+              placeholder="Correo, teléfono o dirección"
+            />
+
+            <button
+              onClick={save}
+              disabled={saving}
+              className="btn-game btn-blue mt-4 w-full"
+            >
+              {saving ? "Guardando..." : "Guardar ajustes"}
+            </button>
+
+            <div className="mt-4 rounded-2xl bg-[#f6f8ff] p-3 text-sm">
+              <div className="font-bold text-[#41507a]">
+                Proveedor (Encargado del Tratamiento)
+              </div>
+              <div className="text-[#6b7aa0] font-semibold mt-1">
+                {proveedorNombre ? (
+                  <>
+                    {proveedorNombre}
+                    {proveedorContacto ? ` · ${proveedorContacto}` : ""}
+                  </>
+                ) : (
+                  "Tratamiento 100% interno (no se ceden datos a terceros)."
+                )}
+              </div>
+              <div className="text-[11px] text-[#9aa6bf] mt-1">
+                Se configura en el archivo .env (PROVEEDOR_NOMBRE /
+                PROVEEDOR_CONTACTO) y se refleja en el texto de autorización.
+              </div>
+            </div>
+
+            {canEditTextos && (
+              <button
+                onClick={() => setShowTextEditor(true)}
+                className="btn-game btn-gray mt-3 w-full"
+              >
+                ✍️ Editar texto de autorización
+                {hasOverride ? " (personalizado)" : ""}
+              </button>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="card p-6">
+        <h3 className="text-xl font-black text-[#27407a] mb-1">
+          Retención de biometría
+        </h3>
+        <p className="text-sm text-[#6b7aa0] font-semibold mb-4">
+          La ley exige no conservar datos biométricos más allá de lo necesario.
+          Configura cuándo eliminarlos automáticamente. (Estos ajustes se
+          guardan con el botón de arriba.)
+        </p>
+        {!loading && (
+          <>
+            <label className="flex items-center gap-2 font-bold text-[#41507a] mb-3">
+              <input
+                type="checkbox"
+                checked={purgaAnio}
+                onChange={(e) => setPurgaAnio(e.target.checked)}
+                className="w-5 h-5"
+              />
+              Borrar biometría de cursos de años anteriores (fin de año escolar)
+            </label>
+
+            <label className="label-game">
+              Borrar biometría sin actividad por (meses, 0 = sin límite)
+            </label>
+            <input
+              type="number"
+              min={0}
+              max={240}
+              className="input-game"
+              value={retencionMeses}
+              onChange={(e) => setRetencionMeses(Number(e.target.value))}
+            />
+
+            <button
+              onClick={applyRetention}
+              disabled={retRunning}
+              className="btn-game btn-red mt-4 w-full"
+            >
+              {retRunning ? "Aplicando..." : "🗑️ Aplicar retención ahora"}
+            </button>
+            <p className="mt-2 text-xs text-[#9aa6bf] font-semibold">
+              También puedes programarlo con{" "}
+              <code>npm run retention:apply</code>.
+            </p>
+            {retMsg && (
+              <div className="mt-3 font-bold text-center text-[#41507a]">
+                {retMsg}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {showTextEditor && (
+        <ConsentTextEditor
+          initial={effectiveSections}
+          defaults={defaultSections}
+          hasOverride={hasOverride}
+          onClose={() => setShowTextEditor(false)}
+          onSaved={() => {
+            // Recarga el estado del override desde el servidor.
+            fetch("/api/settings")
+              .then((r) => (r.ok ? r.json() : null))
+              .then((data) => {
+                if (Array.isArray(data?.consentTextos))
+                  setConsentTextos(data.consentTextos);
+              })
+              .catch(() => {});
+          }}
+        />
+      )}
     </div>
   );
 }

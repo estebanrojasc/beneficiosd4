@@ -37,8 +37,13 @@ Abre [http://localhost:3000](http://localhost:3000)
 | `MONGODB_URI` | URI de MongoDB Atlas |
 | `MONGODB_DB` | Nombre de la base (default: `almuerzo_escolar`) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Acceso al mantenedor |
-| `AUTH_SECRET` | Secreto JWT para sesiones |
-| `KIOSK_TOKEN` | Clave que ingresas en la tablet en `/validar` |
+| `AUTH_SECRET` | Secreto JWT para sesiones (obligatorio y fuerte en producción) |
+| `DATA_ENCRYPTION_KEY` | Llave para cifrar el descriptor facial en reposo (estable) |
+| `NEXT_PUBLIC_BYPASS_CONSENT` | **Solo pruebas**: `true` omite la autorización del apoderado |
+
+> El acceso del kiosko ya no usa un token global. Cada **programa** tiene su
+> propia **clave de validador**, que se genera al crearlo y se escribe en la
+> tablet en `/validar`.
 
 ## Rutas principales
 
@@ -54,20 +59,30 @@ Abre [http://localhost:3000](http://localhost:3000)
 
 1. **Cargar lista de RUTs** autorizados en Mantenedor → *Lista almuerzo* (carga masiva o uno a uno).
 2. **Enrolar estudiantes**: desde el mantenedor (captura de cara) o imprimir el **QR** para que se enrolen solos.
-3. Fijar una **tablet** en `/validar` con la clave de kiosko (`KIOSK_TOKEN`).
+3. Fijar una **tablet** en `/validar` con la **clave de validador del programa** (se ve en su configuración).
 4. Revisar **asistencia** del día en el mantenedor.
 
 ## Protección de datos
 
 - No se almacenan fotografías.
 - Se guarda únicamente el **vector de 512 dimensiones** (descriptor facial ArcFace).
-- Los descriptores solo se usan para comparar rostros en el dispositivo.
+- El descriptor se guarda **cifrado en reposo** (AES-256-GCM con `DATA_ENCRYPTION_KEY`).
+- La cara es un **dato biométrico de menores**: requiere la **autorización firmada del apoderado** (Ley 21.719), que se registra en el panel. Sin ella, la captura queda bloqueada.
+- **Auditoría**: todo acceso, descarga, alta, cambio, borrado o revocación de biometría queda registrado (pestaña _Auditoría_, permiso `auditoria`).
+- **Minimización**: `/api/descriptors` entrega solo los descriptores del programa (los miembros), no toda la base, cuando el programa exige lista.
+- **Caché del kiosko cifrada**: los descriptores cacheados en IndexedDB se cifran (AES-GCM) con una clave derivada de la clave del validador y caducan a las 24 h.
+- **Retención**: en _Ajustes → Retención de biometría_ se configura el borrado automático (fin de año escolar / inactividad). Manual con el botón o programado con `npm run retention:apply` (`--dry-run` para previsualizar).
+- **Derechos del titular**: desde la ficha del estudiante se puede **exportar** todos sus datos (acceso/portabilidad); rectificación (editar), supresión (eliminar) y revocación (autorización) ya disponibles.
+- **DPO/Responsable**: configurables en _Ajustes → Protección de datos_; aparecen en la política de privacidad y en el documento de autorización.
+- **Proveedor (Encargado del Tratamiento)**: si una empresa externa procesa los datos, se declara en `.env` (`PROVEEDOR_NOMBRE`, `PROVEEDOR_CONTACTO`) y el texto lo informa a los apoderados. Si se deja vacío, el texto indica tratamiento 100% interno.
+- **Texto legal editable**: con el permiso `textosLegales` (por defecto solo administrador), en _Ajustes_ se puede editar el texto de autorización/privacidad. Al guardar queda fijo; «Restaurar texto automático» vuelve al generado con los datos dinámicos.
+- Para cifrar descriptores ya cargados: `npm run encrypt:descriptors` (usa `--dry-run` para previsualizar).
 - Si vienes de una versión con descriptores de 128 dimensiones, debes **re-enrolar** a los estudiantes.
 
 ## Offline
 
 - Los modelos de IA (`/public/models`) y la app se cachean con **service worker**.
-- Los descriptores se guardan en **IndexedDB** al sincronizar.
+- Los descriptores se guardan en **IndexedDB cifrados** (caducan a las 24 h) al sincronizar.
 - Si no hay internet, la asistencia se encola y se sube al volver la conexión.
 
 ## Modelos faciales

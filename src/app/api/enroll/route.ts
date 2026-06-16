@@ -5,6 +5,9 @@ import { isValidRut, normalizeRut } from "@/lib/rut";
 import { getSettings } from "@/lib/settings";
 import { resolveCursoYear, linkStudentToCurso } from "@/lib/cursoServer";
 import { findDuplicateFace } from "@/lib/faceMatchServer";
+import { isConsentGranted, isConsentBypassEnabled } from "@/lib/consentServer";
+import { encryptDescriptor } from "@/lib/crypto";
+import { logAudit, ipFromRequest, actorFromSession } from "@/lib/audit";
 
 // Endpoint PÚBLICO de auto-enrolamiento (formulario al que se llega por QR).
 export async function POST(req: NextRequest) {
@@ -32,6 +35,25 @@ export async function POST(req: NextRequest) {
   // Solo un docente con sesión puede confirmar caras muy parecidas (gemelos).
   const session = await getSession();
   const force = Boolean((body as { force?: boolean }).force) && Boolean(session);
+
+  // La biometría de un menor exige autorización firmada del apoderado, que debe
+  // estar registrada en el sistema ANTES del auto-enrolamiento. El estudiante no
+  // puede consentir por sí mismo: si no hay autorización, se bloquea.
+  const existing = await db
+    .collection("students")
+    .findOne({ rut: norm }, { projection: { consent: 1 } });
+  if (!isConsentGranted(existing?.consent) && !isConsentBypassEnabled()) {
+    return NextResponse.json(
+      {
+        error: "CONSENT_REQUIRED",
+        message:
+          "Para registrar tu cara, tu apoderado debe firmar primero la " +
+          "autorización de uso de datos biométricos. Acércate a la escuela " +
+          "para entregarla.",
+      },
+      { status: 409 }
+    );
+  }
 
   const allowed = await db.collection("allowedRuts").findOne({ rut: norm });
   const { enrolamientoAbierto, umbralCaraDuplicada } = await getSettings(db);
@@ -92,7 +114,7 @@ export async function POST(req: NextRequest) {
         anio: anioFinal,
         // Solo se garantiza almuerzo si está en el listado autorizado.
         perteneceAlmuerzo: Boolean(allowed),
-        faceDescriptor,
+        faceDescriptor: encryptDescriptor(faceDescriptor),
         enrolled: true,
         updatedAt: now,
       },
@@ -107,6 +129,17 @@ export async function POST(req: NextRequest) {
   if (saved?._id && cursoNombre) {
     await linkStudentToCurso(db, saved._id, cursoNombre);
   }
+
+  const who = actorFromSession(session);
+  await logAudit(db, {
+    action: "face.enroll",
+    actor: who.actor,
+    actorType: session ? "admin" : "public",
+    rut: norm,
+    studentId: saved?._id?.toString(),
+    detail: "Registro de cara por auto-enrolamiento",
+    ip: ipFromRequest(req),
+  });
 
   return NextResponse.json({ ok: true, perteneceAlmuerzo: Boolean(allowed) });
 }

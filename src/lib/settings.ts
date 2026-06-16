@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { isValidConsentSections, type ConsentSection } from "./consent";
 
 // Configuración global del establecimiento (documento único).
 const SETTINGS_KEY = "config";
@@ -14,6 +15,20 @@ export interface AppSettings {
   establecimientoNombre: string;
   // Logo como data URL (base64) o vacío.
   logo: string;
+  // --- Protección de datos (Ley 21.719) ---
+  // Responsable del tratamiento (si difiere del nombre del establecimiento).
+  responsableTratamiento: string;
+  // Encargado de Protección de Datos (DPO): nombre y contacto público.
+  dpoNombre: string;
+  dpoContacto: string; // correo, teléfono o dirección
+  // Retención de biometría: meses de inactividad tras los cuales se borra el
+  // descriptor facial (0 = sin límite por inactividad).
+  retencionMeses: number;
+  // Borrar biometría de cursos de años anteriores al actual (fin de año escolar).
+  retencionPurgaAnioAnterior: boolean;
+  // Override del texto de autorización/privacidad. Vacío = se genera automático
+  // con los datos del establecimiento, DPO y proveedor.
+  consentTextos: ConsentSection[];
 }
 
 const DEFAULT_UMBRAL = 70;
@@ -40,6 +55,21 @@ export async function getSettings(db: Db): Promise<AppSettings> {
         ? doc.establecimientoNombre
         : "",
     logo: typeof doc?.logo === "string" ? doc.logo : "",
+    responsableTratamiento:
+      typeof doc?.responsableTratamiento === "string"
+        ? doc.responsableTratamiento
+        : "",
+    dpoNombre: typeof doc?.dpoNombre === "string" ? doc.dpoNombre : "",
+    dpoContacto: typeof doc?.dpoContacto === "string" ? doc.dpoContacto : "",
+    retencionMeses:
+      Number.isFinite(Number(doc?.retencionMeses)) &&
+      Number(doc?.retencionMeses) >= 0
+        ? Math.floor(Number(doc?.retencionMeses))
+        : 0,
+    retencionPurgaAnioAnterior: Boolean(doc?.retencionPurgaAnioAnterior),
+    consentTextos: isValidConsentSections(doc?.consentTextos)
+      ? (doc!.consentTextos as ConsentSection[])
+      : [],
   };
 }
 
@@ -67,6 +97,28 @@ export async function saveSettings(
     if (logo === "") set.logo = "";
     else if (/^data:image\//.test(logo) && logo.length <= MAX_LOGO_LEN)
       set.logo = logo;
+  }
+  if (patch.responsableTratamiento !== undefined)
+    set.responsableTratamiento = String(patch.responsableTratamiento).slice(0, 160);
+  if (patch.dpoNombre !== undefined)
+    set.dpoNombre = String(patch.dpoNombre).slice(0, 160);
+  if (patch.dpoContacto !== undefined)
+    set.dpoContacto = String(patch.dpoContacto).slice(0, 240);
+  if (patch.retencionMeses !== undefined) {
+    const m = Number(patch.retencionMeses);
+    if (Number.isFinite(m) && m >= 0 && m <= 240) set.retencionMeses = Math.floor(m);
+  }
+  if (patch.retencionPurgaAnioAnterior !== undefined)
+    set.retencionPurgaAnioAnterior = Boolean(patch.retencionPurgaAnioAnterior);
+  if (patch.consentTextos !== undefined) {
+    // Array vacío (o inválido) limpia el override → se vuelve al texto automático.
+    const v = patch.consentTextos;
+    set.consentTextos = isValidConsentSections(v)
+      ? v.map((s) => ({
+          titulo: String(s.titulo).slice(0, 200),
+          parrafos: s.parrafos.map((p) => String(p).slice(0, 4000)),
+        }))
+      : [];
   }
 
   await db.collection("settings").updateOne(

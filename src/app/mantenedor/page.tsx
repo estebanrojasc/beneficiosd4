@@ -15,7 +15,8 @@ type Tab =
   | "cursos"
   | "ajustes"
   | "usuarios"
-  | "roles";
+  | "roles"
+  | "auditoria";
 
 interface TabDef {
   id: Tab;
@@ -38,6 +39,7 @@ const GESTION_TABS: TabDef[] = [
   { id: "cursos", label: "Cursos", emoji: "🏫", cap: "cursos" },
   { id: "usuarios", label: "Usuarios", emoji: "👥", cap: "usuarios" },
   { id: "roles", label: "Roles", emoji: "🛡️", cap: "usuarios" },
+  { id: "auditoria", label: "Auditoría", emoji: "📜", cap: "auditoria" },
   { id: "ajustes", label: "Ajustes", emoji: "⚙️", cap: "ajustes" },
 ];
 
@@ -50,6 +52,7 @@ const ALL_TABS: Tab[] = [
   "ajustes",
   "usuarios",
   "roles",
+  "auditoria",
 ];
 
 const STORAGE_KEY = "mantenedor:nav";
@@ -88,6 +91,10 @@ const RolesTab = dynamic(() => import("@/components/mantenedor/RolesTab"), {
 });
 const AjustesTab = dynamic(
   () => import("@/components/mantenedor/AjustesTab"),
+  { loading: () => <TabLoading />, ssr: false }
+);
+const AuditoriaTab = dynamic(
+  () => import("@/components/mantenedor/AuditoriaTab"),
   { loading: () => <TabLoading />, ssr: false }
 );
 
@@ -311,6 +318,7 @@ export default function MantenedorPage() {
         {tab === "cursos" && <CursosTab />}
         {tab === "usuarios" && <UsuariosTab />}
         {tab === "roles" && <RolesTab />}
+        {tab === "auditoria" && <AuditoriaTab />}
         {tab === "ajustes" && <AjustesTab />}
       </section>
     </main>

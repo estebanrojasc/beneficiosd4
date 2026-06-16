@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "migrate:consent": "node scripts/migrate-consent.mjs",
+    "encrypt:descriptors": "node scripts/encrypt-descriptors.mjs",
+    "retention:apply": "node scripts/apply-retention.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
+import { isKioskTokenValid } from "@/lib/programs";
 
 interface SearchResult {
   rut: string;
@@ -24,16 +25,14 @@ export async function GET(req: NextRequest) {
     req.headers.get("x-kiosk-token") ||
     req.nextUrl.searchParams.get("token") ||
     "";
-  const kioskToken = process.env.KIOSK_TOKEN || "kiosko2026";
 
-  if (!session && token !== kioskToken) {
+  const db = await getDb();
+  if (!session && !(await isKioskTokenValid(db, token))) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
   }
 
   const q = req.nextUrl.searchParams.get("q")?.trim() || "";
   if (q.length < 2) return NextResponse.json({ results: [] });
-
-  const db = await getDb();
   const rx = { $regex: escapeRegex(q), $options: "i" };
 
   const studentDocs = await db

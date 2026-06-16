@@ -201,14 +201,14 @@ export function registrationStatus(p: ProgramDoc): {
   return { open: Date.now() < expires, expiresAt: new Date(expires).toISOString() };
 }
 
-// Valida una clave de kiosko: la global (KIOSK_TOKEN) o la propia de algún
-// programa. Se usa para los descriptores (caras), que son globales.
+// Valida una clave de kiosko: debe coincidir con la clave de validador de ALGÚN
+// programa. Se usa para los descriptores (caras), que son globales. Ya no existe
+// un token global de kiosko: cada programa tiene su propia clave revocable.
 export async function isKioskTokenValid(
   db: Db,
   token: string
 ): Promise<boolean> {
   if (!token) return false;
-  if (token === (process.env.KIOSK_TOKEN || "kiosko2026")) return true;
   const doc = await db
     .collection("programs")
     .findOne({ validadorClave: token }, { projection: { _id: 1 } });
@@ -223,7 +223,6 @@ export function programValidadorAuthorized(
 ): boolean {
   if (hasSession) return true;
   if (!token) return false;
-  if (token === (process.env.KIOSK_TOKEN || "kiosko2026")) return true;
   return token === p.validadorClave;
 }
 

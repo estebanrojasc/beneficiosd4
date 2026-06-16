@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { isValidRut, normalizeRut } from "@/lib/rut";
 import { cosineSimilarity } from "@/lib/faceMatchServer";
+import { decryptDescriptor } from "@/lib/crypto";
 import { fullName } from "@/lib/curso";
 import {
   getProgramByToken,
@@ -70,7 +71,10 @@ export async function POST(
 
   const norm = normalizeRut(rut);
   const student = await db.collection("students").findOne({ rut: norm });
-  if (!student || !student.enrolled || !Array.isArray(student.faceDescriptor)) {
+  const enrolledDescriptor = student
+    ? decryptDescriptor(student.faceDescriptor)
+    : null;
+  if (!student || !student.enrolled || !enrolledDescriptor) {
     return NextResponse.json(
       {
         error: "NOT_ENROLLED",
@@ -82,7 +86,7 @@ export async function POST(
   }
 
   // Verificación 1:1: la cara capturada debe coincidir con la enrolada.
-  const score = cosineSimilarity(faceDescriptor, student.faceDescriptor);
+  const score = cosineSimilarity(faceDescriptor, enrolledDescriptor);
   if (score < VERIFY_THRESHOLD) {
     return NextResponse.json(
       {

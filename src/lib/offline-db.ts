@@ -2,9 +2,20 @@
 
 import { openDB, type IDBPDatabase } from "idb";
 import type { FaceDescriptorEntry } from "./types";
+import {
+  encryptJSON,
+  decryptJSON,
+  generateSalt,
+  type EncryptedBlob,
+} from "./kioskCrypto";
 
 const DB_NAME = "almuerzo-kiosko";
 const DB_VERSION = 1;
+
+// Vigencia de la caché de descriptores en la tablet. Pasado este tiempo sin
+// poder refrescar desde el servidor, se considera caducada y se descarta, para
+// no operar con datos biométricos potencialmente obsoletos. (24 horas)
+const DESCRIPTOR_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface QueuedAttendance {
   id?: number;
@@ -43,20 +54,76 @@ function getDB() {
   return dbPromise;
 }
 
-// --- Descriptores cacheados ---
-export async function saveDescriptors(entries: FaceDescriptorEntry[]) {
+// --- Descriptores cacheados (cifrados en reposo) ---
+// La caché se cifra con una clave derivada del secreto del kiosko (clave del
+// validador del programa). Si no hay secreto o Web Crypto no está disponible, NO
+// se cachea en disco: el kiosko funcionará solo con conexión.
+export async function saveDescriptors(
+  entries: FaceDescriptorEntry[],
+  secret: string
+) {
   const db = await getDB();
+  // Migración/limpieza: descartamos cualquier copia en claro previa.
   const tx = db.transaction("descriptors", "readwrite");
   await tx.store.clear();
-  for (const e of entries) await tx.store.put(e);
   await tx.done;
-  await setMeta("descriptorsUpdatedAt", new Date().toISOString());
+
+  let salt = (await getMeta("descriptorsSalt")) as string | undefined;
+  if (!salt) {
+    salt = generateSalt();
+    await setMeta("descriptorsSalt", salt);
+  }
+
+  const blob = await encryptJSON(entries, secret, salt);
+  if (!blob) {
+    // Sin cifrado posible: no dejamos descriptores en disco.
+    await setMeta("descriptorsBlob", null);
+    await setMeta("descriptorsCount", 0);
+    return;
+  }
+
+  const now = Date.now();
+  await setMeta("descriptorsBlob", blob);
+  await setMeta("descriptorsUpdatedAt", new Date(now).toISOString());
+  await setMeta("descriptorsExpiresAt", now + DESCRIPTOR_TTL_MS);
   await setMeta("descriptorsCount", entries.length);
 }
 
-export async function getDescriptors(): Promise<FaceDescriptorEntry[]> {
+export async function getDescriptors(
+  secret: string
+): Promise<FaceDescriptorEntry[]> {
+  const blob = (await getMeta("descriptorsBlob")) as
+    | EncryptedBlob
+    | null
+    | undefined;
+  if (!blob) return [];
+
+  const expiresAt = (await getMeta("descriptorsExpiresAt")) as
+    | number
+    | undefined;
+  if (typeof expiresAt === "number" && Date.now() > expiresAt) {
+    // Caché caducada: la descartamos.
+    await clearDescriptors();
+    return [];
+  }
+
+  const salt = (await getMeta("descriptorsSalt")) as string | undefined;
+  if (!salt) return [];
+
+  const entries = await decryptJSON<FaceDescriptorEntry[]>(blob, secret, salt);
+  // Clave incorrecta o blob corrupto: no devolvemos nada (y no rompemos).
+  return Array.isArray(entries) ? entries : [];
+}
+
+// Borra la caché de descriptores (al cerrar sesión del kiosko o cambiar de clave).
+export async function clearDescriptors() {
   const db = await getDB();
-  return (await db.getAll("descriptors")) as FaceDescriptorEntry[];
+  const tx = db.transaction("descriptors", "readwrite");
+  await tx.store.clear();
+  await tx.done;
+  await setMeta("descriptorsBlob", null);
+  await setMeta("descriptorsExpiresAt", 0);
+  await setMeta("descriptorsCount", 0);
 }
 
 // --- Cola de asistencia offline ---

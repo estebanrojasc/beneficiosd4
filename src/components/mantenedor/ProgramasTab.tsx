@@ -5,9 +5,10 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import type { Program, ProgramModalidad } from "@/lib/types";
 import { isValidRut, formatRut, normalizeRut } from "@/lib/rut";
-import { fullName } from "@/lib/curso";
+import { fullName, compareByName, type NameSort } from "@/lib/curso";
 import CursoSelect from "@/components/CursoSelect";
 import CourseAccordion from "@/components/CourseAccordion";
+import NameSortToggle from "@/components/NameSortToggle";
 import RutInput from "@/components/RutInput";
 import type { StudentLite } from "@/components/mantenedor/StudentModal";
 import { fetchStudentsPage } from "@/lib/studentsClient";
@@ -589,6 +590,7 @@ function MembersSection({
   const [rut, setRut] = useState("");
   const [filtroCurso, setFiltroCurso] = useState("");
   const [q, setQ] = useState("");
+  const [sortBy, setSortBy] = useState<NameSort>("apellidos");
   const [error, setError] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -732,7 +734,13 @@ function MembersSection({
     });
   }, [members, filtroCurso, q]);
 
-  const grupos = useMemo(() => groupByCurso(visibles), [visibles]);
+  const grupos = useMemo(() => {
+    const gs = groupByCurso(visibles);
+    for (const [, items] of gs) {
+      items.sort((a, b) => compareByName(a, b, sortBy));
+    }
+    return gs;
+  }, [visibles, sortBy]);
 
   if (program.requiereMembresia === false) {
     return (
@@ -831,10 +839,13 @@ function MembersSection({
         </div>
       </div>
 
-      <div className="text-xs font-bold text-[#9aa6bf]">
-        {visibles.length} estudiantes en {grupos.length} curso
-        {grupos.length !== 1 ? "s" : ""} · total lista: {members.length} · sin
-        cara: {members.filter((m) => !m.enrolled).length}
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-xs font-bold text-[#9aa6bf]">
+          {visibles.length} estudiantes en {grupos.length} curso
+          {grupos.length !== 1 ? "s" : ""} · total lista: {members.length} · sin
+          cara: {members.filter((m) => !m.enrolled).length}
+        </div>
+        <NameSortToggle value={sortBy} onChange={setSortBy} />
       </div>
 
       {loading ? (

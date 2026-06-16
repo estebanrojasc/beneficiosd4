@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import type { StudentLite } from "./StudentModal";
 import CursoSelect from "@/components/CursoSelect";
+import NameSortToggle from "@/components/NameSortToggle";
 import { formatRut } from "@/lib/rut";
-import { fullName } from "@/lib/curso";
+import { fullName, type NameSort } from "@/lib/curso";
 import { fetchStudentsPage } from "@/lib/studentsClient";
 
 interface StudentRow extends StudentLite {
@@ -31,6 +32,7 @@ export default function StudentsTab() {
   const [students, setStudents] = useState<StudentRow[]>([]);
   const [q, setQ] = useState("");
   const [cursoFilter, setCursoFilter] = useState("");
+  const [sortBy, setSortBy] = useState<NameSort>("apellidos");
   const [loading, setLoading] = useState(false);
   const [total, setTotal] = useState(0);
   const [hasMore, setHasMore] = useState(false);
@@ -44,7 +46,13 @@ export default function StudentsTab() {
     q.trim().length >= MIN_SEARCH || Boolean(cursoFilter.trim());
 
   const load = useCallback(
-    async (query: string, curso: string, skip = 0, append = false) => {
+    async (
+      query: string,
+      curso: string,
+      sort: NameSort,
+      skip = 0,
+      append = false
+    ) => {
       const searchable = query.trim().length >= MIN_SEARCH || Boolean(curso);
       if (!searchable) {
         setStudents([]);
@@ -57,6 +65,7 @@ export default function StudentsTab() {
         const params = new URLSearchParams({
           limit: String(PAGE_SIZE),
           skip: String(skip),
+          sort,
         });
         if (query.trim()) params.set("q", query.trim());
         if (curso) params.set("curso", curso);
@@ -72,14 +81,14 @@ export default function StudentsTab() {
   );
 
   useEffect(() => {
-    const t = setTimeout(() => load(q, cursoFilter, 0, false), 250);
+    const t = setTimeout(() => load(q, cursoFilter, sortBy, 0, false), 250);
     return () => clearTimeout(t);
-  }, [q, cursoFilter, load]);
+  }, [q, cursoFilter, sortBy, load]);
 
   async function remove(id: string, nombre: string) {
     if (!confirm(`¿Eliminar a ${nombre}?`)) return;
     await fetch(`/api/students/${id}`, { method: "DELETE" });
-    load(q, cursoFilter, 0, false);
+    load(q, cursoFilter, sortBy, 0, false);
   }
 
   return (
@@ -134,8 +143,11 @@ export default function StudentsTab() {
       )}
 
       {canLoad && !loading && students.length > 0 && (
-        <div className="text-sm font-bold text-[#6b7aa0] mb-3">
-          Mostrando {students.length} de {total}
+        <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+          <div className="text-sm font-bold text-[#6b7aa0]">
+            Mostrando {students.length} de {total}
+          </div>
+          <NameSortToggle value={sortBy} onChange={setSortBy} />
         </div>
       )}
 
@@ -153,7 +165,7 @@ export default function StudentsTab() {
                 {formatRut(s.rut)} · {s.curso}
                 {s.anio ? ` · ${s.anio}` : ""}
               </div>
-              <div className="flex gap-2 mt-1">
+              <div className="flex gap-2 mt-1 flex-wrap">
                 <span
                   className={`text-xs font-bold rounded-full px-2 py-0.5 ${
                     s.enrolled
@@ -163,6 +175,27 @@ export default function StudentsTab() {
                 >
                   {s.enrolled ? "Cara ✓" : "Sin cara"}
                 </span>
+                <span
+                  className={`text-xs font-bold rounded-full px-2 py-0.5 ${
+                    s.consent?.status === "otorgado"
+                      ? "bg-green-100 text-green-700"
+                      : s.consent?.status === "revocado"
+                      ? "bg-red-100 text-red-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}
+                  title="Autorización del apoderado"
+                >
+                  {s.consent?.status === "otorgado"
+                    ? "Autorizado ✓"
+                    : s.consent?.status === "revocado"
+                    ? "Revocado"
+                    : "Sin autorización"}
+                </span>
+                {s.consent?.requiereRegularizacion && (
+                  <span className="text-xs font-bold rounded-full px-2 py-0.5 bg-orange-100 text-orange-700">
+                    Regularizar
+                  </span>
+                )}
               </div>
             </div>
             <div className="flex flex-col gap-2 shrink-0">
@@ -186,7 +219,7 @@ export default function StudentsTab() {
       {hasMore && !loading && (
         <div className="flex justify-center mt-5">
           <button
-            onClick={() => load(q, cursoFilter, students.length, true)}
+            onClick={() => load(q, cursoFilter, sortBy, students.length, true)}
             className="btn-game btn-gray !px-6"
           >
             Ver más ({total - students.length} restantes)
@@ -200,7 +233,7 @@ export default function StudentsTab() {
           onClose={() => setModal({ open: false })}
           onSaved={() => {
             setModal({ open: false });
-            load(q, cursoFilter, 0, false);
+            load(q, cursoFilter, sortBy, 0, false);
           }}
         />
       )}
@@ -211,7 +244,7 @@ export default function StudentsTab() {
           onClose={() => setBulkAI(false)}
           onDone={() => {
             setBulkAI(false);
-            load(q, cursoFilter, 0, false);
+            load(q, cursoFilter, sortBy, 0, false);
           }}
         />
       )}

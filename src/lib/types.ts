@@ -1,5 +1,9 @@
 // Tipos compartidos entre cliente y servidor.
 
+import type { StudentConsent } from "./consent";
+
+export type { StudentConsent } from "./consent";
+
 export interface Student {
   _id?: string;
   nombre: string;
@@ -11,6 +15,8 @@ export interface Student {
   // Descriptor matemático ArcFace de la cara (512 floats). NO se guarda la foto.
   faceDescriptor: number[] | null;
   enrolled: boolean;
+  // Consentimiento del apoderado para el tratamiento biométrico (Ley 21.719).
+  consent?: StudentConsent;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,6 +76,8 @@ export const CAP_KEYS = [
   "cursos",
   "usuarios",
   "ajustes",
+  "auditoria",
+  "textosLegales",
 ] as const;
 
 export type CapKey = (typeof CAP_KEYS)[number];
@@ -82,6 +90,8 @@ export const CAP_LABELS: Record<CapKey, string> = {
   cursos: "Cursos",
   usuarios: "Usuarios y roles",
   ajustes: "Ajustes",
+  auditoria: "Auditoría de datos",
+  textosLegales: "Editar textos legales",
 };
 
 export type RoleCaps = Record<CapKey, boolean>;
@@ -175,7 +185,8 @@ export interface Program {
   qrVentanaMin: number;
   // Momento en que se abrió la ventana de registro (null = cerrada).
   qrOpenAt?: string | null;
-  // Clave del validador (kiosko) propia del programa (como KIOSK_TOKEN).
+  // Clave del validador (kiosko) propia del programa; se usa para operar el
+  // kiosko de ESE programa. Reemplaza al antiguo token global.
   validadorClave: string;
   // Umbral (%) de baja asistencia (solo modalidad temporal).
   umbralAsistencia: number;

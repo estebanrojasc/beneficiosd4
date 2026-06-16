@@ -8,6 +8,10 @@ import { syncAllowedRut } from "@/lib/allowedRutsServer";
 import { findDuplicateFace } from "@/lib/faceMatchServer";
 import { getSettings } from "@/lib/settings";
 import { fullName } from "@/lib/curso";
+import { buildGrantedConsent, isConsentBypassEnabled } from "@/lib/consentServer";
+import { encryptDescriptor } from "@/lib/crypto";
+import { logAudit, ipFromRequest } from "@/lib/audit";
+import type { StudentConsent } from "@/lib/consent";
 
 interface StudentDoc {
   _id?: ObjectId;
@@ -17,8 +21,10 @@ interface StudentDoc {
   anio: number;
   rut: string;
   perteneceAlmuerzo: boolean;
-  faceDescriptor: number[] | null;
+  // Cifrado en reposo: string "enc:v1:..." (o arreglo legado, o null).
+  faceDescriptor: string | number[] | null;
   enrolled: boolean;
+  consent?: StudentConsent;
   createdAt: string;
   updatedAt: string;
 }
@@ -64,6 +70,13 @@ export async function GET(req: NextRequest) {
     if (Number.isFinite(anio)) filter.anio = anio;
   }
 
+  // Orden del listado: por apellido (por defecto) o por nombre.
+  const sortParam = req.nextUrl.searchParams.get("sort");
+  const sortSpec: Record<string, 1 | -1> =
+    sortParam === "nombre"
+      ? { nombre: 1, apellidos: 1 }
+      : { apellidos: 1, nombre: 1 };
+
   const coll = db.collection<StudentDoc>("students");
   const [total, docs] = await Promise.all([
     coll.countDocuments(filter),
@@ -72,7 +85,7 @@ export async function GET(req: NextRequest) {
       // El descriptor facial es pesado y sensible; no hace falta leerlo para
       // listados, búsquedas ni filtros de curso.
       .project<Omit<StudentDoc, "faceDescriptor">>({ faceDescriptor: 0 })
-      .sort({ nombre: 1 })
+      .sort(sortSpec)
       .skip(skip)
       .limit(limit)
       .toArray(),
@@ -105,6 +118,32 @@ export async function POST(req: NextRequest) {
   }
   if (!isValidRut(rut)) {
     return NextResponse.json({ error: "RUT inválido" }, { status: 400 });
+  }
+
+  // Si vienen datos de autorización del apoderado, los validamos y construimos
+  // el consentimiento "otorgado". Si no, el estudiante queda como "pendiente".
+  let consent: StudentConsent = { status: "pendiente" };
+  const consentInput = (body as { consent?: unknown }).consent;
+  if (consentInput && typeof consentInput === "object") {
+    const built = buildGrantedConsent(consentInput, session.username);
+    if (!built.ok || !built.consent)
+      return NextResponse.json({ error: built.error }, { status: 400 });
+    consent = built.consent;
+  }
+
+  // La cara solo se puede registrar con autorización otorgada.
+  const wantsFace = Array.isArray(faceDescriptor) && faceDescriptor.length > 0;
+  const descArray = wantsFace ? (faceDescriptor as number[]) : null;
+  if (wantsFace && consent.status !== "otorgado" && !isConsentBypassEnabled()) {
+    return NextResponse.json(
+      {
+        error: "CONSENT_REQUIRED",
+        message:
+          "No se puede registrar la cara sin la autorización firmada del " +
+          "apoderado. Registra primero la autorización.",
+      },
+      { status: 409 }
+    );
   }
 
   const db = await getDb();
@@ -153,14 +192,26 @@ export async function POST(req: NextRequest) {
     anio: anioFinal,
     rut: normRut,
     perteneceAlmuerzo: Boolean(perteneceAlmuerzo),
-    faceDescriptor: Array.isArray(faceDescriptor) ? faceDescriptor : null,
-    enrolled: Array.isArray(faceDescriptor) && faceDescriptor.length > 0,
+    faceDescriptor: descArray ? encryptDescriptor(descArray) : null,
+    enrolled: wantsFace,
+    consent,
     createdAt: now,
     updatedAt: now,
   };
 
   const res = await db.collection<StudentDoc>("students").insertOne(doc);
   await linkStudentToCurso(db, res.insertedId, curso.trim());
+  if (wantsFace) {
+    await logAudit(db, {
+      action: "face.enroll",
+      actor: session.username,
+      actorType: "admin",
+      rut: normRut,
+      studentId: res.insertedId.toString(),
+      detail: "Alta de estudiante con cara registrada",
+      ip: ipFromRequest(req),
+    });
+  }
   // La marca "pertenece almuerzo" se refleja en la Lista almuerzo.
   await syncAllowedRut(db, {
     rut: normRut,

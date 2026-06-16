@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Db } from "mongodb";
 import { getDb } from "@/lib/mongodb";
 import { getSession } from "@/lib/auth";
 import { normalizeRut } from "@/lib/rut";
 import { dateInTZ } from "@/lib/date";
+import { isKioskTokenValid } from "@/lib/programs";
 
-function authorized(req: NextRequest, session: unknown): boolean {
+async function authorized(
+  req: NextRequest,
+  session: unknown,
+  db: Db
+): Promise<boolean> {
   if (session) return true;
   const token =
     req.headers.get("x-kiosk-token") ||
     req.nextUrl.searchParams.get("token") ||
     "";
-  return token === (process.env.KIOSK_TOKEN || "kiosko2026");
+  return isKioskTokenValid(db, token);
 }
 
 interface QueuedRecord {
@@ -25,7 +31,8 @@ interface QueuedRecord {
 // Recibe registros acumulados offline y los inserta evitando duplicados por día.
 export async function POST(req: NextRequest) {
   const session = await getSession();
-  if (!authorized(req, session))
+  const db = await getDb();
+  if (!(await authorized(req, session, db)))
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
@@ -33,7 +40,6 @@ export async function POST(req: NextRequest) {
     ? body.records
     : [];
 
-  const db = await getDb();
   let inserted = 0;
   let duplicates = 0;
 

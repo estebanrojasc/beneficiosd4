@@ -1,4 +1,5 @@
 import type { Db } from "mongodb";
+import { decryptDescriptor } from "./crypto";
 
 // Similitud coseno entre dos vectores (descriptores ArcFace ya normalizados).
 export function cosineSimilarity(a: number[], b: number[]): number {
@@ -45,7 +46,7 @@ export async function findDuplicateFace(
 
   let best: DuplicateFaceMatch | null = null;
   for (const d of docs) {
-    const desc = d.faceDescriptor as number[] | null;
+    const desc = decryptDescriptor(d.faceDescriptor);
     if (!Array.isArray(desc) || desc.length !== descriptor.length) continue;
     const score = cosineSimilarity(descriptor, desc);
     if (score >= threshold && (!best || score > best.score)) {
