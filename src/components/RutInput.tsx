@@ -8,6 +8,7 @@ interface Props {
   placeholder?: string;
   className?: string;
   center?: boolean;
+  disabled?: boolean;
 }
 
 // Input de RUT reutilizable. Muestra SIEMPRE el formato con puntos y guion
@@ -18,6 +19,7 @@ export default function RutInput({
   placeholder = "12.345.678-9",
   className = "input-game",
   center = false,
+  disabled = false,
 }: Props) {
   return (
     <input
@@ -26,6 +28,7 @@ export default function RutInput({
       onChange={(e) => onChange(formatRut(e.target.value))}
       placeholder={placeholder}
       inputMode="text"
+      disabled={disabled}
     />
   );
 }

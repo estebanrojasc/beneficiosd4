@@ -20,6 +20,7 @@ export type AuditAction =
 export type ActorType = "admin" | "kiosk" | "public" | "system";
 
 export interface AuditEntry {
+  _id?: string; // ID único del log (ObjectId string)
   action: AuditAction;
   actor: string; // usuario, "público" o "kiosko:<programa>"
   actorType: ActorType;
@@ -51,7 +52,7 @@ export function ipFromRequest(req: NextRequest): string {
 // operación principal (se registra el error en consola y se sigue).
 export async function logAudit(
   db: Db,
-  entry: Omit<AuditEntry, "at"> & { at?: string }
+  entry: Omit<AuditEntry, "at" | "_id"> & { at?: string }
 ): Promise<void> {
   try {
     await db.collection("audit_logs").insertOne({
@@ -89,6 +90,7 @@ export async function listAudit(
   ]);
 
   const items = docs.map((d) => ({
+    _id: d._id.toString(),
     action: d.action,
     actor: d.actor,
     actorType: d.actorType,

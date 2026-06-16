@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 interface AuditItem {
+  _id?: string;
   action: string;
   actor: string;
   actorType: string;
@@ -153,7 +154,22 @@ export default function AuditoriaTab() {
                   </span>
                 </td>
                 <td className="p-3 font-mono text-[#41507a]">{it.rut || "—"}</td>
-                <td className="p-3 text-[#5b6b94]">{it.detail || "—"}</td>
+                <td className="p-3 text-[#5b6b94]">
+                  <div>{it.detail || "—"}</div>
+                  {(it.action === "consent.revoke" ||
+                    it.action === "student.delete" ||
+                    it.action === "retention.purge") &&
+                    it._id && (
+                      <a
+                        href={`/certificado-eliminacion/${it._id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 mt-1 text-xs text-[#4f7cff] hover:text-[#3b66df] font-black underline"
+                      >
+                        📄 Acta de Borrado (ISO 27001)
+                      </a>
+                    )}
+                </td>
                 <td className="p-3 font-mono text-[11px] text-[#9aa6bf]">
                   {it.ip || "—"}
                 </td>

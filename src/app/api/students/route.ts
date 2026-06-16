@@ -27,6 +27,7 @@ interface StudentDoc {
   consent?: StudentConsent;
   createdAt: string;
   updatedAt: string;
+  fechaNacimiento?: string; // Fecha de nacimiento (YYYY-MM-DD)
 }
 
 function serialize(doc: StudentDoc | Omit<StudentDoc, "faceDescriptor">) {
@@ -104,7 +105,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "No autorizado" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
-  const { nombre, apellidos, curso, rut, perteneceAlmuerzo, faceDescriptor } =
+  const { nombre, apellidos, curso, rut, perteneceAlmuerzo, faceDescriptor, fechaNacimiento } =
     body as Partial<StudentDoc>;
   // El docente puede confirmar un enrolamiento aunque la cara se parezca mucho
   // a otra (caso de gemelos/hermanos): para eso envía force = true.
@@ -118,6 +119,12 @@ export async function POST(req: NextRequest) {
   }
   if (!isValidRut(rut)) {
     return NextResponse.json({ error: "RUT inválido" }, { status: 400 });
+  }
+  if (fechaNacimiento && !/^\d{4}-\d{2}-\d{2}$/.test(fechaNacimiento)) {
+    return NextResponse.json(
+      { error: "Fecha de nacimiento inválida (debe ser AAAA-MM-DD)" },
+      { status: 400 }
+    );
   }
 
   // Si vienen datos de autorización del apoderado, los validamos y construimos
@@ -197,6 +204,7 @@ export async function POST(req: NextRequest) {
     consent,
     createdAt: now,
     updatedAt: now,
+    fechaNacimiento: fechaNacimiento || undefined,
   };
 
   const res = await db.collection<StudentDoc>("students").insertOne(doc);

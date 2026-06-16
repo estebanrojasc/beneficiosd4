@@ -6,7 +6,7 @@ import RutInput from "@/components/RutInput";
 import CursoSelect from "@/components/CursoSelect";
 import { splitNombreCompleto } from "@/lib/curso";
 import type { Program, StudentConsent } from "@/lib/types";
-import { PARENTESCOS, consentStatusLabel } from "@/lib/consent";
+import { PARENTESCOS, consentStatusLabel, calculateAge, getAutonomyTier, ESTUDIANTE_TITULAR_PARENTESCO } from "@/lib/consent";
 import { isValidRut, normalizeRut } from "@/lib/rut";
 
 export interface StudentLite {
@@ -18,6 +18,7 @@ export interface StudentLite {
   rut: string;
   enrolled?: boolean;
   consent?: StudentConsent;
+  fechaNacimiento?: string;
 }
 
 interface Props {
@@ -33,6 +34,7 @@ function getInitialForm(initial?: Partial<StudentLite>) {
       apellidos: "",
       curso: "",
       rut: "",
+      fechaNacimiento: "",
     };
   }
 
@@ -50,6 +52,7 @@ function getInitialForm(initial?: Partial<StudentLite>) {
     apellidos,
     curso: initial.curso || "",
     rut: initial.rut || "",
+    fechaNacimiento: initial.fechaNacimiento || "",
   };
 }
 
@@ -66,10 +69,15 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
   const [apellidos, setApellidos] = useState(initialForm.apellidos);
   const [curso, setCurso] = useState(initialForm.curso);
   const [rut, setRut] = useState(initialForm.rut);
+  const [fechaNacimiento, setFechaNacimiento] = useState(initialForm.fechaNacimiento);
+  const [autoFirma, setAutoFirma] = useState(false);
   const [descriptor, setDescriptor] = useState<number[] | null>(null);
   const [showCapture, setShowCapture] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const age = fechaNacimiento ? calculateAge(fechaNacimiento) : 0;
+  const autonomyTier = fechaNacimiento ? getAutonomyTier(age) : "tutela";
 
   // --- Consentimiento del apoderado (Ley 21.719) ---
   const [consent, setConsent] = useState<StudentConsent | undefined>(
@@ -89,6 +97,28 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
   // SOLO PRUEBAS: permite capturar sin autorización si está activado el bypass.
   const bypassConsent = process.env.NEXT_PUBLIC_BYPASS_CONSENT === "true";
   const captureUnlocked = consentGranted || bypassConsent;
+
+  const [revocationAuditId, setRevocationAuditId] = useState<string | null>(null);
+
+  const fetchRevocationLog = useCallback(async () => {
+    const r = (initial?.rut || "").trim();
+    if (!r) return;
+    try {
+      const res = await fetch(`/api/audit?rut=${encodeURIComponent(r)}&action=consent.revoke&limit=1`, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items && data.items.length > 0) {
+          setRevocationAuditId(data.items[0]._id);
+        }
+      }
+    } catch {}
+  }, [initial?.rut]);
+
+  useEffect(() => {
+    if (consent?.status === "revocado") {
+      void fetchRevocationLog();
+    }
+  }, [consent?.status, fetchRevocationLog]);
 
   // Programas (con lista) a los que pertenece el estudiante.
   const [programs, setPrograms] = useState<Program[]>([]);
@@ -165,6 +195,8 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
       parentesco: parentesco.trim(),
       firmadoAt,
       notas: notas.trim(),
+      autonomo: autoFirma,
+      fechaNacimiento: fechaNacimiento || undefined,
     };
   }
 
@@ -251,6 +283,7 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
       setConsent({ status: "revocado" });
       setDescriptor(null);
       setConsentMsg("Autorización revocada y cara eliminada.");
+      void fetchRevocationLog();
       onSaved();
     } catch {
       setConsentMsg("Error de conexión.");
@@ -272,6 +305,7 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
         apellidos,
         curso,
         rut,
+        fechaNacimiento: fechaNacimiento || null,
       };
       if (descriptor) payload.faceDescriptor = descriptor;
       if (force) payload.force = true;
@@ -364,6 +398,42 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
             <label className="label-game">RUT</label>
             <RutInput value={rut} onChange={setRut} />
           </div>
+          <div className="sm:col-span-2">
+            <label className="label-game">Fecha de nacimiento (opcional)</label>
+            <input
+              type="date"
+              className="input-game animate-pop"
+              value={fechaNacimiento}
+              max={todayISO()}
+              onChange={(e) => setFechaNacimiento(e.target.value)}
+            />
+          </div>
+          {fechaNacimiento && (
+            <div className="sm:col-span-2 rounded-2xl p-3 text-xs border bg-[#f8fafc] border-slate-200">
+              <span className="font-bold text-slate-500 block mb-1">Nivel de Autonomía (Ley 21.719 / 21.430):</span>
+              <div className="flex items-center gap-2">
+                <span className="font-black text-slate-800">
+                  Edad calculada: {age} años
+                </span>
+                <span className={`px-2 py-0.5 rounded-full font-extrabold text-[10px] ${
+                  autonomyTier === "plena"
+                    ? "bg-indigo-100 text-indigo-700"
+                    : autonomyTier === "progresiva"
+                    ? "bg-sky-100 text-sky-700"
+                    : "bg-amber-100 text-amber-700"
+                }`}>
+                  {autonomyTier === "plena" && "Plena Autonomía"}
+                  {autonomyTier === "progresiva" && "Autonomía Progresiva"}
+                  {autonomyTier === "tutela" && "Tutela"}
+                </span>
+              </div>
+              <p className="text-[#9aa6bf] font-medium mt-1">
+                {autonomyTier === "plena" && "El estudiante (mayor de 16 años) tiene autonomía plena para autorizar el tratamiento de su biometría."}
+                {autonomyTier === "progresiva" && "El adolescente (14-15 años) requiere consentimiento de su apoderado y co-firma/asentimiento propio."}
+                {autonomyTier === "tutela" && "El menor (menor de 14 años) requiere la autorización firmada de su apoderado (explicado en lenguaje claro)."}
+              </p>
+            </div>
+          )}
         </div>
 
         {programs.length > 0 && (
@@ -406,7 +476,7 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <span className="font-bold text-[#41507a]">
-                Autorización del apoderado
+                {autonomyTier === "plena" ? "Consentimiento autónomo del estudiante" : "Autorización del apoderado"}
               </span>
               <div className="mt-1 flex items-center gap-2 flex-wrap">
                 <span
@@ -458,13 +528,39 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
               >
                 Revocar autorización
               </button>
+              {revocationAuditId && (
+                <a
+                  href={`/certificado-eliminacion/${revocationAuditId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block mt-2 text-xs font-bold text-[#4f7cff] underline"
+                >
+                  📄 Descargar Acta de Eliminación (ISO 27001)
+                </a>
+              )}
+            </div>
+          ) : consent?.status === "revocado" ? (
+            <div className="mt-3 text-sm text-[#5b6b94] font-semibold">
+              <p>La autorización fue revocada y la biometría eliminada.</p>
+              {revocationAuditId && (
+                <a
+                  href={`/certificado-eliminacion/${revocationAuditId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block mt-2 text-xs font-bold text-[#4f7cff] underline"
+                >
+                  📄 Descargar Acta de Eliminación (ISO 27001)
+                </a>
+              )}
             </div>
           ) : (
             <div className="mt-3">
               <p className="text-xs text-[#9aa6bf] font-semibold mb-2">
-                El reconocimiento facial trata datos biométricos de un menor. Se
-                necesita la autorización firmada del apoderado antes de capturar
-                la cara.
+                {autonomyTier === "plena"
+                  ? "El reconocimiento facial trata datos biométricos. El estudiante mayor de 16 años puede autorizar por sí mismo, o un apoderado puede firmar en su representación."
+                  : autonomyTier === "progresiva"
+                  ? "El adolescente (14-15 años) requiere la firma del apoderado y su co-asentimiento informado antes de capturar la cara."
+                  : "El reconocimiento facial trata datos biométricos de un menor. Se necesita la autorización firmada del apoderado antes de capturar la cara."}
               </p>
               {!showConsentForm ? (
                 <div className="flex gap-2 flex-wrap">
@@ -478,20 +574,54 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
                 </div>
               ) : (
                 <div className="space-y-3">
+                  {autonomyTier === "plena" && (
+                    <label className="flex items-center gap-2 rounded-xl border-2 border-[#eef2ff] p-2 bg-[#f8fafc] cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={autoFirma}
+                        onChange={(e) => {
+                          const val = e.target.checked;
+                          setAutoFirma(val);
+                          if (val) {
+                            setApoderadoNombre(`${nombre} ${apellidos}`.trim());
+                            setApoderadoRut(rut);
+                            setParentesco(ESTUDIANTE_TITULAR_PARENTESCO);
+                            setConfirmoFisico(true);
+                          } else {
+                            setApoderadoNombre("");
+                            setApoderadoRut("");
+                            setParentesco("");
+                            setConfirmoFisico(false);
+                          }
+                        }}
+                        className="w-5 h-5 accent-[#4f7cff]"
+                      />
+                      <span className="text-xs font-bold text-[#27407a]">
+                        ✍️ El propio estudiante firma por sí mismo (Plena Autonomía Ley 21.719)
+                      </span>
+                    </label>
+                  )}
+                  {autonomyTier === "progresiva" && (
+                    <div className="rounded-xl border-2 border-sky-200 bg-sky-50 p-3 text-xs font-semibold text-sky-800">
+                      Requiere documento con firma del apoderado y co-asentimiento del adolescente (14-15 años).
+                    </div>
+                  )}
                   <div>
-                    <label className="label-game">Nombre del apoderado</label>
+                    <label className="label-game">Nombre del apoderado / consintiente</label>
                     <input
                       className="input-game"
                       value={apoderadoNombre}
+                      disabled={autoFirma}
                       onChange={(e) => setApoderadoNombre(e.target.value)}
                       placeholder="Ej: María Pérez"
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="label-game">RUT del apoderado</label>
+                      <label className="label-game">RUT del consintiente</label>
                       <RutInput
                         value={apoderadoRut}
+                        disabled={autoFirma}
                         onChange={setApoderadoRut}
                       />
                     </div>
@@ -500,9 +630,15 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
                       <select
                         className="input-game"
                         value={parentesco}
+                        disabled={autoFirma}
                         onChange={(e) => setParentesco(e.target.value)}
                       >
                         <option value="">Selecciona…</option>
+                        {autoFirma && (
+                          <option value={ESTUDIANTE_TITULAR_PARENTESCO}>
+                            {ESTUDIANTE_TITULAR_PARENTESCO}
+                          </option>
+                        )}
                         {PARENTESCOS.map((p) => (
                           <option key={p} value={p}>
                             {p}
@@ -536,12 +672,14 @@ export default function StudentModal({ initial, onClose, onSaved }: Props) {
                     <input
                       type="checkbox"
                       checked={confirmoFisico}
+                      disabled={autoFirma}
                       onChange={(e) => setConfirmoFisico(e.target.checked)}
                       className="w-5 h-5 accent-[#4f7cff] mt-0.5"
                     />
                     <span>
-                      Confirmo que el documento de autorización está firmado por
-                      el apoderado y archivado físicamente.
+                      {autoFirma
+                        ? "Confirmo que el documento de consentimiento autónomo está firmado por el estudiante y archivado físicamente."
+                        : "Confirmo que el documento de autorización está firmado por el apoderado y archivado físicamente."}
                     </span>
                   </label>
                   <div className="flex gap-2">

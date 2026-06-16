@@ -1,4 +1,10 @@
-import { CONSENT_VERSION, type StudentConsent } from "./consent";
+import {
+  CONSENT_VERSION,
+  calculateAge,
+  getAutonomyTier,
+  isAutonomousParentesco,
+  type StudentConsent,
+} from "./consent";
 import { isValidRut, normalizeRut } from "./rut";
 
 export interface ConsentInput {
@@ -7,6 +13,8 @@ export interface ConsentInput {
   parentesco?: string;
   firmadoAt?: string;
   notas?: string;
+  autonomo?: boolean;
+  fechaNacimiento?: string;
 }
 
 export interface BuildConsentResult {
@@ -26,13 +34,40 @@ export function buildGrantedConsent(
   const rawRut = (input.apoderadoRut || "").trim();
   const firmadoAt = (input.firmadoAt || "").trim();
   const notas = (input.notas || "").trim();
+  const autonomo =
+    Boolean(input.autonomo) || isAutonomousParentesco(parentesco);
 
+  if (autonomo) {
+    const fn = (input.fechaNacimiento || "").trim();
+    if (fn) {
+      const age = calculateAge(fn);
+      if (getAutonomyTier(age) !== "plena") {
+        return {
+          ok: false,
+          error:
+            "El consentimiento autónomo solo aplica a estudiantes de 16 años o más.",
+        };
+      }
+    }
+  }
+
+  const titularLabel = autonomo ? "estudiante" : "apoderado";
   if (apoderadoNombre.length < 3)
-    return { ok: false, error: "Falta el nombre del apoderado." };
+    return { ok: false, error: `Falta el nombre del ${titularLabel}.` };
   if (!parentesco)
-    return { ok: false, error: "Indica el parentesco del apoderado." };
+    return {
+      ok: false,
+      error: autonomo
+        ? "Indica que el estudiante consiente de forma autónoma."
+        : "Indica el parentesco del apoderado.",
+    };
   if (!rawRut || !isValidRut(rawRut))
-    return { ok: false, error: "El RUT del apoderado no es válido." };
+    return {
+      ok: false,
+      error: autonomo
+        ? "El RUT del estudiante no es válido."
+        : "El RUT del apoderado no es válido.",
+    };
   if (!firmadoAt || !/^\d{4}-\d{2}-\d{2}$/.test(firmadoAt))
     return { ok: false, error: "Indica la fecha de firma del documento." };
 

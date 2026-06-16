@@ -68,6 +68,13 @@ export async function PUT(
       return NextResponse.json({ error: "RUT inválido" }, { status: 400 });
     update.rut = normalizeRut(body.rut);
   }
+  if (typeof body.fechaNacimiento === "string") {
+    const fn = body.fechaNacimiento.trim();
+    if (fn !== "" && !/^\d{4}-\d{2}-\d{2}$/.test(fn)) {
+      return NextResponse.json({ error: "Fecha de nacimiento inválida" }, { status: 400 });
+    }
+    update.fechaNacimiento = fn || null;
+  }
   if (Array.isArray(body.faceDescriptor)) {
     update.faceDescriptor =
       body.faceDescriptor.length > 0

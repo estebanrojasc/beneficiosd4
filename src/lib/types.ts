@@ -19,6 +19,7 @@ export interface Student {
   consent?: StudentConsent;
   createdAt: string;
   updatedAt: string;
+  fechaNacimiento?: string; // Fecha de nacimiento (YYYY-MM-DD)
 }
 
 // Listado maestro de RUTs autorizados para almorzar.

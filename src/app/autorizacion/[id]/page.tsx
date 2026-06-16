@@ -5,6 +5,9 @@ import { useParams } from "next/navigation";
 import {
   resolveConsentSections,
   CONSENT_VERSION,
+  CHILD_EXPLANATION,
+  calculateAge,
+  getAutonomyTier,
   type ConsentSection,
 } from "@/lib/consent";
 import { fullName } from "@/lib/curso";
@@ -16,6 +19,7 @@ interface StudentData {
   apellidos?: string;
   curso?: string;
   rut: string;
+  fechaNacimiento?: string;
 }
 
 export default function AutorizacionPage() {
@@ -98,6 +102,10 @@ export default function AutorizacionPage() {
     override
   );
   const titular = fullName(student.nombre, student.apellidos);
+  const age = student.fechaNacimiento ? calculateAge(student.fechaNacimiento) : 0;
+  const autonomyTier = student.fechaNacimiento
+    ? getAutonomyTier(age)
+    : "tutela";
 
   return (
     <main className="min-h-screen bg-white text-[#1f2a44]">
@@ -139,11 +147,23 @@ export default function AutorizacionPage() {
         </header>
 
         <p className="mb-4 text-sm">
-          En cumplimiento de la Ley N° 21.719 sobre Protección de Datos
-          Personales, se solicita al apoderado o representante legal del
-          estudiante su autorización expresa, específica e informada para el
-          tratamiento de los datos biométricos (reconocimiento facial) descrito
-          a continuación.
+          {autonomyTier === "plena" ? (
+            <>
+              En cumplimiento de la Ley N° 21.719 sobre Protección de Datos
+              Personales y la Ley N° 21.430 de Garantías de la Niñez, se
+              solicita al estudiante mayor de 16 años su consentimiento expreso,
+              específico e informado para el tratamiento de sus datos biométricos
+              (reconocimiento facial) descrito a continuación.
+            </>
+          ) : (
+            <>
+              En cumplimiento de la Ley N° 21.719 sobre Protección de Datos
+              Personales, se solicita al apoderado o representante legal del
+              estudiante su autorización expresa, específica e informada para el
+              tratamiento de los datos biométricos (reconocimiento facial)
+              descrito a continuación.
+            </>
+          )}
         </p>
 
         {/* Datos del estudiante */}
@@ -159,6 +179,30 @@ export default function AutorizacionPage() {
             <div>
               <strong>Curso:</strong> {student.curso || "—"}
             </div>
+            {student.fechaNacimiento && (
+              <div>
+                <strong>Edad:</strong> {age} años
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Explicación adaptada para el estudiante */}
+        <section className="mb-6 rounded-xl border-2 border-sky-200 bg-sky-50 p-4 text-sm">
+          <h2 className="font-black text-sky-900 mb-3">
+            📘 Explicación para el estudiante (lenguaje claro)
+          </h2>
+          <p className="text-sky-800 mb-3 text-xs">
+            Este apartado debe leerse con el estudiante antes de firmar. Está
+            redactado en lenguaje comprensible conforme a la Ley N° 21.430.
+          </p>
+          <div className="space-y-3">
+            {CHILD_EXPLANATION.map((item) => (
+              <div key={item.pregunta}>
+                <h3 className="font-black text-sky-900">{item.pregunta}</h3>
+                <p className="mt-0.5 text-sky-800">{item.respuesta}</p>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -178,43 +222,133 @@ export default function AutorizacionPage() {
 
         {/* Declaración y firma */}
         <section className="text-sm mb-8">
-          <h3 className="font-black mb-2">Declaración del apoderado</h3>
-          <p className="text-justify mb-6">
-            Declaro haber leído y comprendido la información anterior,
-            habiéndola explicado al estudiante en términos adecuados a su edad y
-            madurez, y <strong>AUTORIZO</strong> de forma libre, específica e
-            informada el tratamiento del descriptor facial del estudiante
-            individualizado, con la finalidad indicada. Entiendo que puedo
-            revocar esta autorización en cualquier momento.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-8 mt-10">
-            <div>
-              <div className="border-t border-[#1f2a44] pt-1 text-xs">
-                Nombre del apoderado
+          {autonomyTier === "plena" ? (
+            <>
+              <h3 className="font-black mb-2">
+                Declaración del estudiante (consentimiento autónomo)
+              </h3>
+              <p className="text-justify mb-6">
+                Declaro haber leído y comprendido la información anterior y{" "}
+                <strong>CONSIENTO</strong> de forma libre, específica e informada
+                el tratamiento de mi descriptor facial, con la finalidad
+                indicada. Entiendo que puedo revocar este consentimiento en
+                cualquier momento.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-8 mt-10">
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Nombre del estudiante
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    RUT del estudiante
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Fecha
+                  </div>
+                </div>
+                <div className="sm:col-span-2 mt-6">
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Firma del estudiante
+                  </div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="border-t border-[#1f2a44] pt-1 text-xs">
-                RUT del apoderado
+            </>
+          ) : autonomyTier === "progresiva" ? (
+            <>
+              <h3 className="font-black mb-2">Declaración del apoderado</h3>
+              <p className="text-justify mb-4">
+                Declaro haber leído y comprendido la información anterior,
+                habiéndola explicado al adolescente en términos adecuados a su
+                edad y madurez, y <strong>AUTORIZO</strong> de forma libre,
+                específica e informada el tratamiento del descriptor facial del
+                estudiante individualizado. Entiendo que puedo revocar esta
+                autorización en cualquier momento.
+              </p>
+              <h3 className="font-black mb-2 mt-6">
+                Asentimiento del adolescente (14-15 años)
+              </h3>
+              <p className="text-justify mb-6">
+                He leído la explicación en lenguaje claro y{" "}
+                <strong>DOY MI ASENTIMIENTO</strong> para el uso de mi rostro en
+                el sistema de almuerzo escolar.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-8 mt-10">
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Nombre del apoderado
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    RUT del apoderado
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Parentesco
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Fecha (apoderado)
+                  </div>
+                </div>
+                <div className="sm:col-span-2 mt-6">
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Firma del apoderado
+                  </div>
+                </div>
+                <div className="sm:col-span-2 mt-8">
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Firma de co-asentimiento del adolescente
+                  </div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="border-t border-[#1f2a44] pt-1 text-xs">
-                Parentesco
+            </>
+          ) : (
+            <>
+              <h3 className="font-black mb-2">Declaración del apoderado</h3>
+              <p className="text-justify mb-6">
+                Declaro haber leído y comprendido la información anterior,
+                habiéndola explicado al estudiante en términos adecuados a su
+                edad y madurez, y <strong>AUTORIZO</strong> de forma libre,
+                específica e informada el tratamiento del descriptor facial del
+                estudiante individualizado, con la finalidad indicada. Entiendo
+                que puedo revocar esta autorización en cualquier momento.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-8 mt-10">
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Nombre del apoderado
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    RUT del apoderado
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Parentesco
+                  </div>
+                </div>
+                <div>
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Fecha
+                  </div>
+                </div>
+                <div className="sm:col-span-2 mt-6">
+                  <div className="border-t border-[#1f2a44] pt-1 text-xs">
+                    Firma del apoderado
+                  </div>
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="border-t border-[#1f2a44] pt-1 text-xs">
-                Fecha
-              </div>
-            </div>
-            <div className="sm:col-span-2 mt-6">
-              <div className="border-t border-[#1f2a44] pt-1 text-xs">
-                Firma del apoderado
-              </div>
-            </div>
-          </div>
+            </>
+          )}
         </section>
 
         <footer className="text-[10px] text-[#9aa6bf] border-t border-[#e1e8f7] pt-2">

@@ -45,6 +45,18 @@ export interface StudentConsent {
 }
 
 // Parentescos sugeridos para el formulario.
+// Parentesco usado cuando el estudiante mayor de 16 años consiente de forma autónoma.
+export const ESTUDIANTE_TITULAR_PARENTESCO =
+  "Estudiante (Titular mayor de 16 años)";
+
+export function isAutonomousParentesco(parentesco: string): boolean {
+  const p = parentesco.trim();
+  return (
+    p === ESTUDIANTE_TITULAR_PARENTESCO ||
+    p.startsWith("Estudiante (Titular")
+  );
+}
+
 export const PARENTESCOS = [
   "Madre",
   "Padre",
@@ -232,3 +244,49 @@ export function consentStatusLabel(status: ConsentStatus | undefined): string {
       return "Pendiente";
   }
 }
+
+// Calcula la edad en años a partir de la fecha de nacimiento (YYYY-MM-DD).
+export function calculateAge(fechaNacimiento: string): number {
+  if (!fechaNacimiento) return 0;
+  const birth = new Date(fechaNacimiento + "T00:00:00");
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const m = now.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {
+    age--;
+  }
+  return age;
+}
+
+// Clasifica el nivel de autonomía según la edad (Ley 21.719 / 21.430).
+export function getAutonomyTier(age: number): "tutela" | "progresiva" | "plena" {
+  if (age >= 16) return "plena";
+  if (age >= 14) return "progresiva";
+  return "tutela";
+}
+
+export interface ChildExplanationSection {
+  pregunta: string;
+  respuesta: string;
+}
+
+// Explicación en lenguaje claro y adaptado para menores de edad (Ley 21.430).
+export const CHILD_EXPLANATION: ChildExplanationSection[] = [
+  {
+    pregunta: "👦👧 ¿Qué es esto y para qué sirve?",
+    respuesta: "Para entrar a almorzar de forma rápida y sin hacer fila, usaremos una tablet con una cámara que reconoce tu cara al pasar."
+  },
+  {
+    pregunta: "📸 ¿Se guardará mi foto o video?",
+    respuesta: "¡No! El sistema no guarda fotos tuyas. Solo convierte tu rostro en un código de números secretos que no sirve para nada fuera de la escuela."
+  },
+  {
+    pregunta: "✋ ¿Es obligatorio?",
+    respuesta: "No, es completamente voluntario. Si tú o tus papás no quieren usar la cara, puedes decírselo al profesor y podrás entrar al almuerzo dictando tu RUT."
+  },
+  {
+    pregunta: "🗑️ ¿Puedo cambiar de opinión?",
+    respuesta: "Sí, puedes pedir que se borren tus números en cualquier momento y volver al método del RUT sin ningún problema."
+  }
+];
+
